@@ -5,9 +5,14 @@ on:
     branches:
       - main
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - uses: actions/checkout@v4
 
@@ -20,6 +25,11 @@ jobs:
           GOOS=linux GOARCH=arm64 go build -o bootstrap ./cmd/server
           zip lambda.zip bootstrap
 
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
       - uses: hashicorp/setup-terraform@v3
 
       - name: terraform init
@@ -29,17 +39,17 @@ jobs:
             -backend-config="dynamodb_table=${{ secrets.TF_STATE_BUCKET }}-lock"
         working-directory: terraform
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           TF_VAR_state_bucket: ${{ secrets.TF_STATE_BUCKET }}
 
-      - name: terraform apply
-        run: terraform apply -auto-approve
+      - name: terraform plan
+        run: terraform plan -out=tfplan
         working-directory: terraform
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           TF_VAR_state_bucket: ${{ secrets.TF_STATE_BUCKET }}
           TF_VAR_google_client_id: ${{ secrets.GOOGLE_CLIENT_ID }}
           TF_VAR_google_client_secret: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           TF_VAR_admin_google_ids: ${{ secrets.ADMIN_GOOGLE_IDS }}
+
+      - name: terraform apply
+        run: terraform apply -auto-approve tfplan
+        working-directory: terraform

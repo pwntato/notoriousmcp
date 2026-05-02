@@ -7,6 +7,15 @@
 #   terraform init \
 #     -backend-config="bucket=YOUR_STATE_BUCKET" \
 #     -backend-config="dynamodb_table=YOUR_STATE_BUCKET-lock"
+#
+# GitHub Actions secrets required:
+#   TF_STATE_BUCKET       — same as state_bucket above
+#   AWS_DEPLOY_ROLE_ARN   — output of `terraform output deploy_role_arn` after first apply
+#   GOOGLE_CLIENT_ID      — from Google Cloud Console
+#   GOOGLE_CLIENT_SECRET  — from Google Cloud Console
+#   ADMIN_GOOGLE_IDS      — comma-separated Google subject IDs
+#
+# Note: No AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY needed — CI uses OIDC federation.
 
 # Required
 state_bucket         = "notoriousmcp-tfstate-YOUR_ACCOUNT_ID"
