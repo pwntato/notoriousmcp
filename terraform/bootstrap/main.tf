@@ -53,3 +53,11 @@ resource "aws_dynamodb_table" "tf_state_lock" {
     type = "S"
   }
 }
+
+output "state_bucket" {
+  value = aws_s3_bucket.tf_state.bucket
+}
+
+output "state_lock_table" {
+  value = aws_dynamodb_table.tf_state_lock.name
+}

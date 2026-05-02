@@ -7,10 +7,10 @@ terraform {
   }
 
   backend "s3" {
-    # Populated at init time via -backend-config or TF_VAR_state_bucket
-    key            = "notoriousmcp/terraform.tfstate"
-    region         = "us-east-1"
-    dynamodb_table = "notoriousmcp-tfstate-lock"
+    # All values passed via -backend-config at init time (see deploy.yml / README)
+    # bucket and dynamodb_table are derived from the bootstrap state_bucket_name output
+    key    = "notoriousmcp/terraform.tfstate"
+    region = "us-east-1"
   }
 }
 

@@ -1,3 +1,13 @@
+# The state_bucket value must match what you used in terraform/bootstrap.
+# After running bootstrap, use its outputs:
+#   state_bucket      = <state_bucket output>
+#   dynamodb_table    = <state_lock_table output>  (passed via -backend-config at init, not here)
+#
+# Init command:
+#   terraform init \
+#     -backend-config="bucket=YOUR_STATE_BUCKET" \
+#     -backend-config="dynamodb_table=YOUR_STATE_BUCKET-lock"
+
 # Required
 state_bucket         = "notoriousmcp-tfstate-YOUR_ACCOUNT_ID"
 google_client_id     = "YOUR_GOOGLE_CLIENT_ID"
