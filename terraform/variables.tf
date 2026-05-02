@@ -81,8 +81,8 @@ variable "domain_contact_country_code" {
 }
 
 variable "domain_contact_phone" {
-  type    = string
-  default = ""
+  type        = string
+  default     = ""
   description = "E.164 format, e.g. +1.5555550100"
 }
 

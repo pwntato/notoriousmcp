@@ -7,48 +7,48 @@ resource "aws_route53domains_registered_domain" "main" {
   dynamic "registrant_contact" {
     for_each = [1]
     content {
-      first_name    = var.domain_contact_first_name
-      last_name     = var.domain_contact_last_name
+      first_name        = var.domain_contact_first_name
+      last_name         = var.domain_contact_last_name
       organization_name = var.domain_contact_organization
-      address_line_1 = var.domain_contact_address
-      city          = var.domain_contact_city
-      state         = var.domain_contact_state
-      zip_code      = var.domain_contact_zip
-      country_code  = var.domain_contact_country_code
-      phone_number  = var.domain_contact_phone
-      email         = var.domain_contact_email
+      address_line_1    = var.domain_contact_address
+      city              = var.domain_contact_city
+      state             = var.domain_contact_state
+      zip_code          = var.domain_contact_zip
+      country_code      = var.domain_contact_country_code
+      phone_number      = var.domain_contact_phone
+      email             = var.domain_contact_email
     }
   }
 
   dynamic "admin_contact" {
     for_each = [1]
     content {
-      first_name    = var.domain_contact_first_name
-      last_name     = var.domain_contact_last_name
+      first_name        = var.domain_contact_first_name
+      last_name         = var.domain_contact_last_name
       organization_name = var.domain_contact_organization
-      address_line_1 = var.domain_contact_address
-      city          = var.domain_contact_city
-      state         = var.domain_contact_state
-      zip_code      = var.domain_contact_zip
-      country_code  = var.domain_contact_country_code
-      phone_number  = var.domain_contact_phone
-      email         = var.domain_contact_email
+      address_line_1    = var.domain_contact_address
+      city              = var.domain_contact_city
+      state             = var.domain_contact_state
+      zip_code          = var.domain_contact_zip
+      country_code      = var.domain_contact_country_code
+      phone_number      = var.domain_contact_phone
+      email             = var.domain_contact_email
     }
   }
 
   dynamic "tech_contact" {
     for_each = [1]
     content {
-      first_name    = var.domain_contact_first_name
-      last_name     = var.domain_contact_last_name
+      first_name        = var.domain_contact_first_name
+      last_name         = var.domain_contact_last_name
       organization_name = var.domain_contact_organization
-      address_line_1 = var.domain_contact_address
-      city          = var.domain_contact_city
-      state         = var.domain_contact_state
-      zip_code      = var.domain_contact_zip
-      country_code  = var.domain_contact_country_code
-      phone_number  = var.domain_contact_phone
-      email         = var.domain_contact_email
+      address_line_1    = var.domain_contact_address
+      city              = var.domain_contact_city
+      state             = var.domain_contact_state
+      zip_code          = var.domain_contact_zip
+      country_code      = var.domain_contact_country_code
+      phone_number      = var.domain_contact_phone
+      email             = var.domain_contact_email
     }
   }
 }

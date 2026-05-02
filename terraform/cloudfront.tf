@@ -1,5 +1,13 @@
 locals {
   lambda_url_host = replace(aws_lambda_function_url.main.function_url, "https://", "")
+  cf_origin_id    = "lambda"
+}
+
+resource "aws_cloudfront_origin_access_control" "lambda" {
+  name                              = "notoriousmcp-lambda-oac-${var.environment}"
+  origin_access_control_origin_type = "lambda"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
 }
 
 resource "aws_cloudfront_distribution" "main" {
@@ -10,8 +18,9 @@ resource "aws_cloudfront_distribution" "main" {
   aliases = var.domain_name != "" ? [var.domain_name] : []
 
   origin {
-    domain_name = local.lambda_url_host
-    origin_id   = "lambda"
+    domain_name              = local.lambda_url_host
+    origin_id                = local.cf_origin_id
+    origin_access_control_id = aws_cloudfront_origin_access_control.lambda.id
 
     custom_origin_config {
       http_port              = 80
@@ -22,7 +31,7 @@ resource "aws_cloudfront_distribution" "main" {
   }
 
   default_cache_behavior {
-    target_origin_id       = "lambda"
+    target_origin_id       = local.cf_origin_id
     viewer_protocol_policy = "redirect-to-https"
     allowed_methods        = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
     cached_methods         = ["GET", "HEAD"]
@@ -41,10 +50,10 @@ resource "aws_cloudfront_distribution" "main" {
   }
 
   viewer_certificate {
-    acm_certificate_arn      = var.domain_name != "" ? aws_acm_certificate_validation.main[0].certificate_arn : null
+    acm_certificate_arn            = var.domain_name != "" ? aws_acm_certificate_validation.main[0].certificate_arn : null
     cloudfront_default_certificate = var.domain_name == ""
-    ssl_support_method       = var.domain_name != "" ? "sni-only" : null
-    minimum_protocol_version = var.domain_name != "" ? "TLSv1.2_2021" : null
+    ssl_support_method             = var.domain_name != "" ? "sni-only" : null
+    minimum_protocol_version       = var.domain_name != "" ? "TLSv1.2_2021" : null
   }
 
   restrictions {
