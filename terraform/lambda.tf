@@ -47,7 +47,7 @@ data "aws_iam_policy_document" "lambda_policy" {
   }
 
   statement {
-    actions   = ["ssm:GetParameter"]
+    actions = ["ssm:GetParameter"]
     resources = [
       aws_ssm_parameter.google_client_id.arn,
       aws_ssm_parameter.google_client_secret.arn,
@@ -77,12 +77,12 @@ resource "aws_lambda_function" "main" {
 
   environment {
     variables = {
-      TABLE_NAME                  = var.table_name
-      S3_BUCKET                   = aws_s3_bucket.content.bucket
-      ENVIRONMENT                 = var.environment
-      SSM_GOOGLE_CLIENT_ID        = aws_ssm_parameter.google_client_id.name
-      SSM_GOOGLE_CLIENT_SECRET    = aws_ssm_parameter.google_client_secret.name
-      SSM_ADMIN_GOOGLE_IDS        = aws_ssm_parameter.admin_google_ids.name
+      TABLE_NAME               = var.table_name
+      S3_BUCKET                = aws_s3_bucket.content.bucket
+      ENVIRONMENT              = var.environment
+      SSM_GOOGLE_CLIENT_ID     = aws_ssm_parameter.google_client_id.name
+      SSM_GOOGLE_CLIENT_SECRET = aws_ssm_parameter.google_client_secret.name
+      SSM_ADMIN_GOOGLE_IDS     = aws_ssm_parameter.admin_google_ids.name
     }
   }
 
