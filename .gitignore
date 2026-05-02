@@ -1,0 +1,20 @@
+# Binaries
+bin/
+*.exe
+
+# Environment
+.env
+
+# Terraform
+terraform/terraform.tfvars
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/bootstrap/.terraform/
+terraform/bootstrap/.terraform.lock.hcl
+terraform/bootstrap/*.tfstate
+terraform/bootstrap/*.tfstate.backup
+
+# Go
+*.test

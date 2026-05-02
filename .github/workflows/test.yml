@@ -1,0 +1,52 @@
+name: test
+
+on:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: go test
+        run: go test ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: fmt check (main)
+        run: terraform fmt -check -recursive
+        working-directory: terraform
+
+      - name: validate (main)
+        run: |
+          terraform init -backend=false
+          terraform validate
+        working-directory: terraform
+
+      - name: fmt check (bootstrap)
+        run: terraform fmt -check -recursive
+        working-directory: terraform/bootstrap
+
+      - name: validate (bootstrap)
+        run: |
+          terraform init -backend=false
+          terraform validate
+        working-directory: terraform/bootstrap

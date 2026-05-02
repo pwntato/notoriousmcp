@@ -1,0 +1,25 @@
+# Required
+state_bucket         = "notoriousmcp-tfstate-YOUR_ACCOUNT_ID"
+google_client_id     = "YOUR_GOOGLE_CLIENT_ID"
+google_client_secret = "YOUR_GOOGLE_CLIENT_SECRET"
+admin_google_ids     = "GOOGLE_SUB_ID_1,GOOGLE_SUB_ID_2"
+
+# Optional — leave domain_name empty to use the CloudFront URL directly
+domain_name = "notoriousmcp.com"
+
+# Required only if domain_name is set
+domain_contact_first_name       = "Jimmy"
+domain_contact_last_name        = "Smith"
+domain_contact_organization     = ""
+domain_contact_address          = "123 Main St"
+domain_contact_city             = "San Francisco"
+domain_contact_state            = "CA"
+domain_contact_zip              = "94105"
+domain_contact_country_code     = "US"
+domain_contact_phone            = "+1.5555550100"
+domain_contact_email            = "you@example.com"
+
+# Defaults — only override if needed
+# aws_region  = "us-east-1"
+# environment = "prod"
+# table_name  = "notoriousmcp"
