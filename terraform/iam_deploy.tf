@@ -4,9 +4,11 @@ data "aws_caller_identity" "current" {}
 # If you already have this provider, import it rather than creating a new one:
 #   terraform import aws_iam_openid_connect_provider.github arn:aws:iam::<account_id>:oidc-provider/token.actions.githubusercontent.com
 resource "aws_iam_openid_connect_provider" "github" {
-  url             = "https://token.actions.githubusercontent.com"
-  client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
+  url            = "https://token.actions.githubusercontent.com"
+  client_id_list = ["sts.amazonaws.com"]
+  # AWS ignores thumbprint_list for token.actions.githubusercontent.com — required by the
+  # resource schema but has no effect; any non-empty value satisfies the provider.
+  thumbprint_list = ["0000000000000000000000000000000000000000"]
 }
 
 data "aws_iam_policy_document" "deploy_assume_role" {
@@ -61,6 +63,9 @@ data "aws_iam_policy_document" "deploy_policy" {
   }
 
   statement {
+    # ssm:PutParameter allows CI to rotate OAuth credentials and admin IDs via terraform apply.
+    # This is intentional — Terraform manages these values — but means anyone who can push to
+    # main (currently only pwntato) can overwrite production secrets.
     actions = [
       "ssm:PutParameter",
       "ssm:GetParameter",
