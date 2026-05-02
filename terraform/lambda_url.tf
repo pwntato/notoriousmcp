@@ -1,6 +1,7 @@
 resource "aws_lambda_function_url" "main" {
   function_name      = aws_lambda_function.main.function_name
   authorization_type = "AWS_IAM"
+  invoke_mode        = "RESPONSE_STREAM"
 }
 
 # Allow CloudFront OAC to invoke the Lambda URL

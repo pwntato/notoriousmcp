@@ -38,4 +38,9 @@ resource "aws_dynamodb_table" "main" {
   point_in_time_recovery {
     enabled = true
   }
+
+  ttl {
+    attribute_name = "TTL"
+    enabled        = false
+  }
 }
