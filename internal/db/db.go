@@ -42,5 +42,9 @@ func todoListSK(listID string) string     { return "TODOLIST#" + listID }
 func todoSK(listID, todoID string) string { return "TODO#" + listID + "#" + todoID }
 func fileSK(path string) string           { return "FILE#" + path }
 
-func gsi1PK(userID, itemType string) string  { return "USER#" + userID + "#" + itemType }
+func gsi1PK(userID, itemType string) string { return "USER#" + userID + "#" + itemType }
+
+// gsi1SK produces a sort key that supports > range queries because RFC3339Nano
+// sorts lexicographically identically to chronologically — valid only when
+// timestamps are always UTC and zero-padded, both enforced by .UTC().Format(isoFormat).
 func gsi1SK(modifiedAt, itemID string) string { return "MODIFIED#" + modifiedAt + "#" + itemID }

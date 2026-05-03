@@ -554,3 +554,42 @@ func TestListTodosModifiedSinceScoped(t *testing.T) {
 		t.Errorf("got %d todos, want 2", len(todos))
 	}
 }
+
+func TestListTodosModifiedSinceAndStatus(t *testing.T) {
+	c := newTestClient(t)
+	ctx := context.Background()
+
+	userID := "user-todos-ms-status"
+	now := time.Now().UTC()
+	listID := "list-ms-status"
+
+	statuses := []models.TodoStatus{models.TodoPending, models.TodoDone, models.TodoPending}
+	for i, s := range statuses {
+		todo := &models.Todo{
+			ID: fmt.Sprintf("mss-%d", i), ListID: listID, UserID: userID,
+			Text: fmt.Sprintf("todo %d", i), Status: s, Version: 1,
+			CreatedAt: now, ModifiedAt: now,
+		}
+		if err := c.SaveTodo(ctx, todo); err != nil {
+			t.Fatalf("save todo: %v", err)
+		}
+	}
+
+	since := now.Add(-time.Minute).UTC().Format(time.RFC3339Nano)
+	pending := models.TodoPending
+	todos, err := c.ListTodos(ctx, userID, listID, since, &pending)
+	if err != nil {
+		t.Fatalf("list todos: %v", err)
+	}
+	if len(todos) != 2 {
+		t.Errorf("got %d todos, want 2 pending", len(todos))
+	}
+	for _, td := range todos {
+		if td.Status != models.TodoPending {
+			t.Errorf("got status %q, want pending", td.Status)
+		}
+		if td.ListID != listID {
+			t.Errorf("got list %q, want %q", td.ListID, listID)
+		}
+	}
+}

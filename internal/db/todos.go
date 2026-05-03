@@ -97,7 +97,10 @@ func (c *Client) SaveTodoList(ctx context.Context, l *models.TodoList) error {
 	return nil
 }
 
-// DeleteTodoList removes a todo list record. Does not cascade-delete todos.
+// DeleteTodoList removes a todo list record. Does not cascade-delete todos —
+// orphaned todo items remain in DynamoDB but are inaccessible via list queries
+// (they're still reachable by direct GetTodo). The MCP handler layer is
+// responsible for deciding whether to delete todos before calling this.
 func (c *Client) DeleteTodoList(ctx context.Context, userID, listID string) error {
 	_, err := c.ddb.DeleteItem(ctx, &dynamodb.DeleteItemInput{
 		TableName: aws.String(c.tableName),
@@ -252,12 +255,16 @@ func (c *Client) ListTodos(ctx context.Context, userID, listID, modifiedSince st
 	}
 
 	if status != nil {
-		input.FilterExpression = aws.String("#status = :status")
 		if input.ExpressionAttributeNames == nil {
 			input.ExpressionAttributeNames = map[string]string{}
 		}
 		input.ExpressionAttributeNames["#status"] = "Status"
 		input.ExpressionAttributeValues[":status"] = &types.AttributeValueMemberS{Value: string(*status)}
+		if input.FilterExpression != nil {
+			input.FilterExpression = aws.String(*input.FilterExpression + " AND #status = :status")
+		} else {
+			input.FilterExpression = aws.String("#status = :status")
+		}
 	}
 
 	var todos []models.Todo

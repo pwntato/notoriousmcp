@@ -46,7 +46,6 @@ func (c *Client) GetUser(ctx context.Context, userID string) (*models.User, erro
 	return userFromRecord(&rec)
 }
 
-
 // SaveUser upserts a user profile. RefreshToken is not written by this
 // function — use SaveRefreshToken for that.
 func (c *Client) SaveUser(ctx context.Context, u *models.User) error {
@@ -72,7 +71,10 @@ func (c *Client) SaveUser(ctx context.Context, u *models.User) error {
 			":createdAt": &types.AttributeValueMemberS{Value: u.CreatedAt.UTC().Format(isoFormat)},
 		},
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("save user: %w", err)
+	}
+	return nil
 }
 
 // SaveRefreshToken writes only the refresh token attribute for an existing user.
@@ -113,7 +115,7 @@ func (c *Client) LoadRefreshToken(ctx context.Context, userID string) (string, e
 		return "", fmt.Errorf("load refresh token: %w", err)
 	}
 	if out.Item == nil {
-		return "", nil
+		return "", ErrNotFound
 	}
 	v, ok := out.Item["RefreshToken"].(*types.AttributeValueMemberS)
 	if !ok {
@@ -150,6 +152,8 @@ func (c *Client) UpdateUserStatus(ctx context.Context, userID string, status mod
 }
 
 // ListUsers scans for all user profiles, optionally filtered by status.
+// This is a full-table scan — acceptable for an admin-only operation at low user counts.
+// Add a GSI on SK = "PROFILE" if this becomes a hot path.
 func (c *Client) ListUsers(ctx context.Context, status *models.UserStatus) ([]models.User, error) {
 	input := &dynamodb.ScanInput{
 		TableName:        aws.String(c.tableName),
