@@ -117,7 +117,11 @@ func (c *Client) LoadRefreshToken(ctx context.Context, userID string) (string, e
 	if out.Item == nil {
 		return "", ErrNotFound
 	}
-	v, ok := out.Item["RefreshToken"].(*types.AttributeValueMemberS)
+	attr := out.Item["RefreshToken"]
+	if attr == nil {
+		return "", ErrNoRefreshToken
+	}
+	v, ok := attr.(*types.AttributeValueMemberS)
 	if !ok {
 		return "", ErrNoRefreshToken
 	}
@@ -152,8 +156,10 @@ func (c *Client) UpdateUserStatus(ctx context.Context, userID string, status mod
 }
 
 // ListUsers scans for all user profiles, optionally filtered by status.
-// This is a full-table scan — acceptable for an admin-only operation at low user counts.
-// Add a GSI on SK = "PROFILE" if this becomes a hot path.
+// This is a full-table scan — it reads every item in the table regardless of
+// the SK = "PROFILE" filter (FilterExpression does not reduce RCUs consumed).
+// Acceptable for an admin-only operation at low user counts; add a GSI on SK
+// if this becomes a hot path.
 func (c *Client) ListUsers(ctx context.Context, status *models.UserStatus) ([]models.User, error) {
 	input := &dynamodb.ScanInput{
 		TableName:        aws.String(c.tableName),

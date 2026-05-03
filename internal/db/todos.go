@@ -80,7 +80,9 @@ func (c *Client) SaveTodoList(ctx context.Context, l *models.TodoList) error {
 			"Tags":       tagsAttr(l.Tags),
 		},
 	}
-	if l.Version > 1 {
+	if l.Version == 1 {
+		input.ConditionExpression = aws.String("attribute_not_exists(PK)")
+	} else {
 		input.ConditionExpression = aws.String("Version = :prev")
 		input.ExpressionAttributeValues = map[string]types.AttributeValue{
 			":prev": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", l.Version-1)},
@@ -192,7 +194,9 @@ func (c *Client) SaveTodo(ctx context.Context, t *models.Todo) error {
 	}
 
 	input := &dynamodb.PutItemInput{TableName: aws.String(c.tableName), Item: item}
-	if t.Version > 1 {
+	if t.Version == 1 {
+		input.ConditionExpression = aws.String("attribute_not_exists(PK)")
+	} else {
 		input.ConditionExpression = aws.String("Version = :prev")
 		input.ExpressionAttributeValues = map[string]types.AttributeValue{
 			":prev": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", t.Version-1)},
@@ -246,6 +250,10 @@ func (c *Client) ListTodos(ctx context.Context, userID, listID, modifiedSince st
 	}
 
 	if modifiedSince != "" {
+		// Trade-off: GSI1SK encodes modifiedAt + todoID but not listID, so we can't
+		// scope the range query to a single list via the key. We query all todos for
+		// the user modified since the timestamp and filter by ListID post-read.
+		// This is acceptable at low todo volume; revisit if it becomes a hot path.
 		input = &dynamodb.QueryInput{
 			TableName:              aws.String(c.tableName),
 			IndexName:              aws.String("GSI1"),

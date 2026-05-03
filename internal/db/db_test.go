@@ -247,6 +247,41 @@ func TestListNotes(t *testing.T) {
 	}
 }
 
+func TestListNotesModifiedSince(t *testing.T) {
+	c := newTestClient(t)
+	ctx := context.Background()
+
+	userID := uid()
+	base := time.Now().UTC().Truncate(time.Second)
+	old := &models.Note{
+		ID: uid(), UserID: userID,
+		Title: "Old", S3Key: "x", Version: 1,
+		CreatedAt: base.Add(-2 * time.Minute), ModifiedAt: base.Add(-2 * time.Minute),
+	}
+	recent := &models.Note{
+		ID: uid(), UserID: userID,
+		Title: "Recent", S3Key: "x", Version: 1,
+		CreatedAt: base, ModifiedAt: base,
+	}
+	for _, n := range []*models.Note{old, recent} {
+		if err := c.SaveNote(ctx, n); err != nil {
+			t.Fatalf("save note: %v", err)
+		}
+	}
+
+	since := base.Add(-time.Minute).UTC().Format(time.RFC3339)
+	notes, err := c.ListNotes(ctx, userID, since)
+	if err != nil {
+		t.Fatalf("list notes: %v", err)
+	}
+	if len(notes) != 1 {
+		t.Errorf("got %d notes, want 1", len(notes))
+	}
+	if len(notes) > 0 && notes[0].Title != "Recent" {
+		t.Errorf("got %q, want Recent", notes[0].Title)
+	}
+}
+
 func TestDeleteNote(t *testing.T) {
 	c := newTestClient(t)
 	ctx := context.Background()

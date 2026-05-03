@@ -45,10 +45,9 @@ func (c *Client) GetNote(ctx context.Context, userID, noteID string) (*models.No
 	return noteFromItem(out.Item)
 }
 
-// SaveNote upserts note metadata. Version > 1 triggers a conditional write
-// (optimistic concurrency). Version == 1 is an unconditional first-write; two
-// concurrent first-writes with the same ID will silently overwrite — safe
-// because IDs are caller-supplied UUIDs and collisions are astronomically unlikely.
+// SaveNote upserts note metadata. Version == 1 requires the item to not already
+// exist (attribute_not_exists), preventing silent resurrection of deleted notes.
+// Version > 1 requires the previous version to match (optimistic concurrency).
 func (c *Client) SaveNote(ctx context.Context, n *models.Note) error {
 	modAt := n.ModifiedAt.UTC().Format(isoFormat)
 	input := &dynamodb.PutItemInput{
@@ -68,7 +67,9 @@ func (c *Client) SaveNote(ctx context.Context, n *models.Note) error {
 			"Tags":       tagsAttr(n.Tags),
 		},
 	}
-	if n.Version > 1 {
+	if n.Version == 1 {
+		input.ConditionExpression = aws.String("attribute_not_exists(PK)")
+	} else {
 		input.ConditionExpression = aws.String("Version = :prev")
 		input.ExpressionAttributeValues = map[string]types.AttributeValue{
 			":prev": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", n.Version-1)},
@@ -85,8 +86,7 @@ func (c *Client) SaveNote(ctx context.Context, n *models.Note) error {
 	return nil
 }
 
-// DeleteNote removes note metadata. Note: a stale client holding version 1
-// can re-create this item after deletion via an unconditional SaveNote (v1).
+// DeleteNote removes note metadata.
 func (c *Client) DeleteNote(ctx context.Context, userID, noteID string) error {
 	_, err := c.ddb.DeleteItem(ctx, &dynamodb.DeleteItemInput{
 		TableName: aws.String(c.tableName),
@@ -123,12 +123,8 @@ func (c *Client) ListNotes(ctx context.Context, userID, modifiedSince string) ([
 		input.ExpressionAttributeValues[":since"] = &types.AttributeValueMemberS{Value: "MODIFIED#" + modifiedSince}
 	}
 
-	return queryNotes(ctx, c.ddb, input)
-}
-
-func queryNotes(ctx context.Context, ddb *dynamodb.Client, input *dynamodb.QueryInput) ([]models.Note, error) {
 	var notes []models.Note
-	paginator := dynamodb.NewQueryPaginator(ddb, input)
+	paginator := dynamodb.NewQueryPaginator(c.ddb, input)
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {

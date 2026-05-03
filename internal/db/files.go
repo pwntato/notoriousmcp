@@ -63,7 +63,9 @@ func (c *Client) SaveFile(ctx context.Context, f *models.File) error {
 			"ModifiedAt": &types.AttributeValueMemberS{Value: modAt},
 		},
 	}
-	if f.Version > 1 {
+	if f.Version == 1 {
+		input.ConditionExpression = aws.String("attribute_not_exists(PK)")
+	} else {
 		input.ConditionExpression = aws.String("Version = :prev")
 		input.ExpressionAttributeValues = map[string]types.AttributeValue{
 			":prev": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", f.Version-1)},
@@ -80,8 +82,7 @@ func (c *Client) SaveFile(ctx context.Context, f *models.File) error {
 	return nil
 }
 
-// DeleteFile removes file metadata. Note: a stale client holding version 1
-// can re-create this item after deletion via an unconditional SaveFile (v1).
+// DeleteFile removes file metadata.
 func (c *Client) DeleteFile(ctx context.Context, userID, path string) error {
 	_, err := c.ddb.DeleteItem(ctx, &dynamodb.DeleteItemInput{
 		TableName: aws.String(c.tableName),
