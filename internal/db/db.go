@@ -35,6 +35,15 @@ func New(ctx context.Context, tableName, endpoint string) (*Client, error) {
 	}, nil
 }
 
+// Item type constants for GSI1PK — using constants prevents typos that would
+// silently return empty results.
+const (
+	itemTypeNote     = "NOTE"
+	itemTypeTodoList = "TODOLIST"
+	itemTypeTodo     = "TODO"
+	itemTypeFile     = "FILE"
+)
+
 func pk(userID string) string             { return "USER#" + userID }
 func profileSK() string                   { return "PROFILE" }
 func noteSK(noteID string) string         { return "NOTE#" + noteID }

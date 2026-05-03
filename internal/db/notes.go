@@ -56,7 +56,7 @@ func (c *Client) SaveNote(ctx context.Context, n *models.Note) error {
 		Item: map[string]types.AttributeValue{
 			"PK":         &types.AttributeValueMemberS{Value: pk(n.UserID)},
 			"SK":         &types.AttributeValueMemberS{Value: noteSK(n.ID)},
-			"GSI1PK":     &types.AttributeValueMemberS{Value: gsi1PK(n.UserID, "NOTE")},
+			"GSI1PK":     &types.AttributeValueMemberS{Value: gsi1PK(n.UserID, itemTypeNote)},
 			"GSI1SK":     &types.AttributeValueMemberS{Value: gsi1SK(modAt, n.ID)},
 			"ID":         &types.AttributeValueMemberS{Value: n.ID},
 			"UserID":     &types.AttributeValueMemberS{Value: n.UserID},
@@ -85,7 +85,8 @@ func (c *Client) SaveNote(ctx context.Context, n *models.Note) error {
 	return nil
 }
 
-// DeleteNote removes note metadata.
+// DeleteNote removes note metadata. Note: a stale client holding version 1
+// can re-create this item after deletion via an unconditional SaveNote (v1).
 func (c *Client) DeleteNote(ctx context.Context, userID, noteID string) error {
 	_, err := c.ddb.DeleteItem(ctx, &dynamodb.DeleteItemInput{
 		TableName: aws.String(c.tableName),
@@ -113,7 +114,7 @@ func (c *Client) ListNotes(ctx context.Context, userID, modifiedSince string) ([
 		IndexName:              aws.String("GSI1"),
 		KeyConditionExpression: aws.String("GSI1PK = :pk"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":pk": &types.AttributeValueMemberS{Value: gsi1PK(userID, "NOTE")},
+			":pk": &types.AttributeValueMemberS{Value: gsi1PK(userID, itemTypeNote)},
 		},
 		ScanIndexForward: aws.Bool(false),
 	}

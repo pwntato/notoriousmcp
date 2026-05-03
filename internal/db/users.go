@@ -119,7 +119,7 @@ func (c *Client) LoadRefreshToken(ctx context.Context, userID string) (string, e
 	}
 	v, ok := out.Item["RefreshToken"].(*types.AttributeValueMemberS)
 	if !ok {
-		return "", nil
+		return "", ErrNoRefreshToken
 	}
 	return v.Value, nil
 }

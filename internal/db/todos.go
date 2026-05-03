@@ -69,7 +69,7 @@ func (c *Client) SaveTodoList(ctx context.Context, l *models.TodoList) error {
 		Item: map[string]types.AttributeValue{
 			"PK":         &types.AttributeValueMemberS{Value: pk(l.UserID)},
 			"SK":         &types.AttributeValueMemberS{Value: todoListSK(l.ID)},
-			"GSI1PK":     &types.AttributeValueMemberS{Value: gsi1PK(l.UserID, "TODOLIST")},
+			"GSI1PK":     &types.AttributeValueMemberS{Value: gsi1PK(l.UserID, itemTypeTodoList)},
 			"GSI1SK":     &types.AttributeValueMemberS{Value: gsi1SK(modAt, l.ID)},
 			"ID":         &types.AttributeValueMemberS{Value: l.ID},
 			"UserID":     &types.AttributeValueMemberS{Value: l.UserID},
@@ -98,9 +98,10 @@ func (c *Client) SaveTodoList(ctx context.Context, l *models.TodoList) error {
 }
 
 // DeleteTodoList removes a todo list record. Does not cascade-delete todos —
-// orphaned todo items remain in DynamoDB but are inaccessible via list queries
-// (they're still reachable by direct GetTodo). The MCP handler layer is
-// responsible for deciding whether to delete todos before calling this.
+// orphaned todo items remain in DynamoDB and are still reachable via GetTodo
+// or ListTodos direct SK queries; they become inaccessible only via
+// ListTodoLists. The MCP handler layer is responsible for deleting todos
+// before calling this if orphan-free deletion is required.
 func (c *Client) DeleteTodoList(ctx context.Context, userID, listID string) error {
 	_, err := c.ddb.DeleteItem(ctx, &dynamodb.DeleteItemInput{
 		TableName: aws.String(c.tableName),
@@ -127,7 +128,7 @@ func (c *Client) ListTodoLists(ctx context.Context, userID string) ([]models.Tod
 		IndexName:              aws.String("GSI1"),
 		KeyConditionExpression: aws.String("GSI1PK = :pk"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":pk": &types.AttributeValueMemberS{Value: gsi1PK(userID, "TODOLIST")},
+			":pk": &types.AttributeValueMemberS{Value: gsi1PK(userID, itemTypeTodoList)},
 		},
 		ScanIndexForward: aws.Bool(false),
 	}
@@ -174,7 +175,7 @@ func (c *Client) SaveTodo(ctx context.Context, t *models.Todo) error {
 	item := map[string]types.AttributeValue{
 		"PK":         &types.AttributeValueMemberS{Value: pk(t.UserID)},
 		"SK":         &types.AttributeValueMemberS{Value: todoSK(t.ListID, t.ID)},
-		"GSI1PK":     &types.AttributeValueMemberS{Value: gsi1PK(t.UserID, "TODO")},
+		"GSI1PK":     &types.AttributeValueMemberS{Value: gsi1PK(t.UserID, itemTypeTodo)},
 		"GSI1SK":     &types.AttributeValueMemberS{Value: gsi1SK(modAt, t.ID)},
 		"ID":         &types.AttributeValueMemberS{Value: t.ID},
 		"ListID":     &types.AttributeValueMemberS{Value: t.ListID},
@@ -235,12 +236,13 @@ func (c *Client) ListTodos(ctx context.Context, userID, listID, modifiedSince st
 		return nil, fmt.Errorf("listID must not be empty")
 	}
 	input := &dynamodb.QueryInput{
-		TableName: aws.String(c.tableName),
+		TableName:              aws.String(c.tableName),
 		KeyConditionExpression: aws.String("PK = :pk AND begins_with(SK, :prefix)"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":pk":     &types.AttributeValueMemberS{Value: pk(userID)},
 			":prefix": &types.AttributeValueMemberS{Value: "TODO#" + listID + "#"},
 		},
+		ScanIndexForward: aws.Bool(false),
 	}
 
 	if modifiedSince != "" {
@@ -250,7 +252,7 @@ func (c *Client) ListTodos(ctx context.Context, userID, listID, modifiedSince st
 			KeyConditionExpression: aws.String("GSI1PK = :pk AND GSI1SK > :since"),
 			FilterExpression:       aws.String("ListID = :listID"),
 			ExpressionAttributeValues: map[string]types.AttributeValue{
-				":pk":     &types.AttributeValueMemberS{Value: gsi1PK(userID, "TODO")},
+				":pk":     &types.AttributeValueMemberS{Value: gsi1PK(userID, itemTypeTodo)},
 				":since":  &types.AttributeValueMemberS{Value: "MODIFIED#" + modifiedSince},
 				":listID": &types.AttributeValueMemberS{Value: listID},
 			},

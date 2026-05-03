@@ -52,7 +52,7 @@ func (c *Client) SaveFile(ctx context.Context, f *models.File) error {
 		Item: map[string]types.AttributeValue{
 			"PK":         &types.AttributeValueMemberS{Value: pk(f.UserID)},
 			"SK":         &types.AttributeValueMemberS{Value: fileSK(f.Path)},
-			"GSI1PK":     &types.AttributeValueMemberS{Value: gsi1PK(f.UserID, "FILE")},
+			"GSI1PK":     &types.AttributeValueMemberS{Value: gsi1PK(f.UserID, itemTypeFile)},
 			"GSI1SK":     &types.AttributeValueMemberS{Value: gsi1SK(modAt, f.Path)},
 			"Path":       &types.AttributeValueMemberS{Value: f.Path},
 			"UserID":     &types.AttributeValueMemberS{Value: f.UserID},
@@ -80,7 +80,8 @@ func (c *Client) SaveFile(ctx context.Context, f *models.File) error {
 	return nil
 }
 
-// DeleteFile removes file metadata.
+// DeleteFile removes file metadata. Note: a stale client holding version 1
+// can re-create this item after deletion via an unconditional SaveFile (v1).
 func (c *Client) DeleteFile(ctx context.Context, userID, path string) error {
 	_, err := c.ddb.DeleteItem(ctx, &dynamodb.DeleteItemInput{
 		TableName: aws.String(c.tableName),
@@ -107,7 +108,7 @@ func (c *Client) ListFiles(ctx context.Context, userID, modifiedSince string) ([
 		IndexName:              aws.String("GSI1"),
 		KeyConditionExpression: aws.String("GSI1PK = :pk"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":pk": &types.AttributeValueMemberS{Value: gsi1PK(userID, "FILE")},
+			":pk": &types.AttributeValueMemberS{Value: gsi1PK(userID, itemTypeFile)},
 		},
 		ScanIndexForward: aws.Bool(false),
 	}

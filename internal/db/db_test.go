@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"os"
@@ -115,7 +116,7 @@ func TestUpdateUserStatus(t *testing.T) {
 func TestGetUserNotFound(t *testing.T) {
 	c := newTestClient(t)
 	_, err := c.GetUser(context.Background(), "nonexistent-"+uid())
-	if err != db.ErrNotFound {
+	if !errors.Is(err, db.ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }
@@ -216,7 +217,7 @@ func TestNoteVersionConflict(t *testing.T) {
 	n3 := *n
 	n3.Title = "stale"
 	n3.Version = 2
-	if err := c.SaveNote(ctx, &n3); err != db.ErrVersionConflict {
+	if err := c.SaveNote(ctx, &n3); !errors.Is(err, db.ErrVersionConflict) {
 		t.Errorf("expected version conflict, got %v", err)
 	}
 }
@@ -264,7 +265,7 @@ func TestDeleteNote(t *testing.T) {
 		t.Fatalf("delete: %v", err)
 	}
 	_, err := c.GetNote(ctx, n.UserID, n.ID)
-	if err != db.ErrNotFound {
+	if !errors.Is(err, db.ErrNotFound) {
 		t.Errorf("expected ErrNotFound after delete, got %v", err)
 	}
 }
@@ -311,7 +312,7 @@ func TestTodoListVersionConflict(t *testing.T) {
 	}
 	l3 := *l
 	l3.Version = 2
-	if err := c.SaveTodoList(ctx, &l3); err != db.ErrVersionConflict {
+	if err := c.SaveTodoList(ctx, &l3); !errors.Is(err, db.ErrVersionConflict) {
 		t.Errorf("expected ErrVersionConflict, got %v", err)
 	}
 }
@@ -333,7 +334,7 @@ func TestDeleteTodoList(t *testing.T) {
 		t.Fatalf("delete: %v", err)
 	}
 	_, err := c.GetTodoList(ctx, l.UserID, l.ID)
-	if err != db.ErrNotFound {
+	if !errors.Is(err, db.ErrNotFound) {
 		t.Errorf("expected ErrNotFound after delete, got %v", err)
 	}
 }
@@ -410,7 +411,7 @@ func TestTodoVersionConflict(t *testing.T) {
 	}
 	t3 := *todo
 	t3.Version = 2
-	if err := c.SaveTodo(ctx, &t3); err != db.ErrVersionConflict {
+	if err := c.SaveTodo(ctx, &t3); !errors.Is(err, db.ErrVersionConflict) {
 		t.Errorf("expected ErrVersionConflict, got %v", err)
 	}
 }
@@ -433,7 +434,7 @@ func TestDeleteTodo(t *testing.T) {
 		t.Fatalf("delete: %v", err)
 	}
 	_, err := c.GetTodo(ctx, todo.UserID, todo.ListID, todo.ID)
-	if err != db.ErrNotFound {
+	if !errors.Is(err, db.ErrNotFound) {
 		t.Errorf("expected ErrNotFound after delete, got %v", err)
 	}
 }
@@ -486,7 +487,7 @@ func TestFileVersionConflict(t *testing.T) {
 	}
 	f3 := *f
 	f3.Version = 2
-	if err := c.SaveFile(ctx, &f3); err != db.ErrVersionConflict {
+	if err := c.SaveFile(ctx, &f3); !errors.Is(err, db.ErrVersionConflict) {
 		t.Errorf("expected ErrVersionConflict, got %v", err)
 	}
 }
@@ -593,5 +594,82 @@ func TestListTodosModifiedSinceAndStatus(t *testing.T) {
 		if td.ListID != listID {
 			t.Errorf("got list %q, want %q", td.ListID, listID)
 		}
+	}
+}
+
+func TestListTodosNoModifiedSince(t *testing.T) {
+	c := newTestClient(t)
+	ctx := context.Background()
+
+	userID, listID := uid(), uid()
+	now := time.Now().UTC()
+	for i := range 3 {
+		todo := &models.Todo{
+			ID: uid(), ListID: listID, UserID: userID,
+			Text: fmt.Sprintf("todo %d", i), Status: models.TodoPending, Version: 1,
+			CreatedAt: now, ModifiedAt: now,
+		}
+		if err := c.SaveTodo(ctx, todo); err != nil {
+			t.Fatalf("save todo %d: %v", i, err)
+		}
+	}
+	todos, err := c.ListTodos(ctx, userID, listID, "", nil)
+	if err != nil {
+		t.Fatalf("list todos: %v", err)
+	}
+	if len(todos) != 3 {
+		t.Errorf("got %d todos, want 3", len(todos))
+	}
+}
+
+func TestLoadRefreshTokenNoAttribute(t *testing.T) {
+	c := newTestClient(t)
+	ctx := context.Background()
+
+	// Create user without ever calling SaveRefreshToken
+	u := &models.User{
+		UserID:    uid(),
+		Email:     "notoken@example.com",
+		Name:      "No Token",
+		Status:    models.StatusPending,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := c.SaveUser(ctx, u); err != nil {
+		t.Fatalf("save user: %v", err)
+	}
+	_, err := c.LoadRefreshToken(ctx, u.UserID)
+	if !errors.Is(err, db.ErrNoRefreshToken) {
+		t.Errorf("expected ErrNoRefreshToken, got %v", err)
+	}
+}
+
+func TestSaveUserPreservesRefreshToken(t *testing.T) {
+	c := newTestClient(t)
+	ctx := context.Background()
+
+	u := &models.User{
+		UserID:    uid(),
+		Email:     "preserve@example.com",
+		Name:      "Preserve Token",
+		Status:    models.StatusPending,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := c.SaveUser(ctx, u); err != nil {
+		t.Fatalf("save user: %v", err)
+	}
+	if err := c.SaveRefreshToken(ctx, u.UserID, "my-token"); err != nil {
+		t.Fatalf("save refresh token: %v", err)
+	}
+	// Re-save user profile — must not overwrite token
+	u.Status = models.StatusUser
+	if err := c.SaveUser(ctx, u); err != nil {
+		t.Fatalf("re-save user: %v", err)
+	}
+	token, err := c.LoadRefreshToken(ctx, u.UserID)
+	if err != nil {
+		t.Fatalf("load refresh token: %v", err)
+	}
+	if token != "my-token" {
+		t.Errorf("token was overwritten: got %q want %q", token, "my-token")
 	}
 }
