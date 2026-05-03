@@ -146,7 +146,12 @@ func fileFromItem(item map[string]types.AttributeValue) (*models.File, error) {
 		Size:    rec.Size,
 		Version: rec.Version,
 	}
-	f.CreatedAt, _ = parseTime(rec.CreatedAt)
-	f.ModifiedAt, _ = parseTime(rec.ModifiedAt)
+	var err error
+	if f.CreatedAt, err = parseTime(rec.CreatedAt); err != nil {
+		return nil, fmt.Errorf("parse file CreatedAt: %w", err)
+	}
+	if f.ModifiedAt, err = parseTime(rec.ModifiedAt); err != nil {
+		return nil, fmt.Errorf("parse file ModifiedAt: %w", err)
+	}
 	return f, nil
 }

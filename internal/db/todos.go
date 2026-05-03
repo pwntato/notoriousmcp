@@ -241,9 +241,11 @@ func (c *Client) ListTodos(ctx context.Context, userID, listID, modifiedSince st
 			TableName:              aws.String(c.tableName),
 			IndexName:              aws.String("GSI1"),
 			KeyConditionExpression: aws.String("GSI1PK = :pk AND GSI1SK > :since"),
+			FilterExpression:       aws.String("ListID = :listID"),
 			ExpressionAttributeValues: map[string]types.AttributeValue{
-				":pk":    &types.AttributeValueMemberS{Value: gsi1PK(userID, "TODO")},
-				":since": &types.AttributeValueMemberS{Value: "MODIFIED#" + modifiedSince},
+				":pk":     &types.AttributeValueMemberS{Value: gsi1PK(userID, "TODO")},
+				":since":  &types.AttributeValueMemberS{Value: "MODIFIED#" + modifiedSince},
+				":listID": &types.AttributeValueMemberS{Value: listID},
 			},
 			ScanIndexForward: aws.Bool(false),
 		}
@@ -288,8 +290,13 @@ func todoListFromItem(item map[string]types.AttributeValue) (*models.TodoList, e
 		Tags:    rec.Tags,
 		Version: rec.Version,
 	}
-	l.CreatedAt, _ = parseTime(rec.CreatedAt)
-	l.ModifiedAt, _ = parseTime(rec.ModifiedAt)
+	var err error
+	if l.CreatedAt, err = parseTime(rec.CreatedAt); err != nil {
+		return nil, fmt.Errorf("parse todo list CreatedAt: %w", err)
+	}
+	if l.ModifiedAt, err = parseTime(rec.ModifiedAt); err != nil {
+		return nil, fmt.Errorf("parse todo list ModifiedAt: %w", err)
+	}
 	return l, nil
 }
 
@@ -307,13 +314,19 @@ func todoFromItem(item map[string]types.AttributeValue) (*models.Todo, error) {
 		Tags:    rec.Tags,
 		Version: rec.Version,
 	}
-	t.CreatedAt, _ = parseTime(rec.CreatedAt)
-	t.ModifiedAt, _ = parseTime(rec.ModifiedAt)
+	var err error
+	if t.CreatedAt, err = parseTime(rec.CreatedAt); err != nil {
+		return nil, fmt.Errorf("parse todo CreatedAt: %w", err)
+	}
+	if t.ModifiedAt, err = parseTime(rec.ModifiedAt); err != nil {
+		return nil, fmt.Errorf("parse todo ModifiedAt: %w", err)
+	}
 	if rec.DueDate != "" {
 		dd, err := parseTime(rec.DueDate)
-		if err == nil {
-			t.DueDate = &dd
+		if err != nil {
+			return nil, fmt.Errorf("parse todo DueDate: %w", err)
 		}
+		t.DueDate = &dd
 	}
 	return t, nil
 }

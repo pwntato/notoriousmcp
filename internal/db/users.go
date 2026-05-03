@@ -13,14 +13,13 @@ import (
 )
 
 type userRecord struct {
-	PK           string           `dynamodbav:"PK"`
-	SK           string           `dynamodbav:"SK"`
-	UserID       string           `dynamodbav:"UserID"`
-	Email        string           `dynamodbav:"Email"`
-	Name         string           `dynamodbav:"Name"`
-	Status       models.UserStatus `dynamodbav:"Status"`
-	RefreshToken string           `dynamodbav:"RefreshToken"`
-	CreatedAt    string           `dynamodbav:"CreatedAt"`
+	PK        string            `dynamodbav:"PK"`
+	SK        string            `dynamodbav:"SK"`
+	UserID    string            `dynamodbav:"UserID"`
+	Email     string            `dynamodbav:"Email"`
+	Name      string            `dynamodbav:"Name"`
+	Status    models.UserStatus `dynamodbav:"Status"`
+	CreatedAt string            `dynamodbav:"CreatedAt"`
 }
 
 // GetUser retrieves a user profile by user ID.
@@ -36,7 +35,7 @@ func (c *Client) GetUser(ctx context.Context, userID string) (*models.User, erro
 		return nil, fmt.Errorf("get user: %w", err)
 	}
 	if out.Item == nil {
-		return nil, nil
+		return nil, ErrNotFound
 	}
 
 	var rec userRecord
@@ -44,8 +43,9 @@ func (c *Client) GetUser(ctx context.Context, userID string) (*models.User, erro
 		return nil, fmt.Errorf("unmarshal user: %w", err)
 	}
 
-	return userFromRecord(&rec), nil
+	return userFromRecord(&rec)
 }
+
 
 // SaveUser upserts a user profile. RefreshToken is not written by this
 // function — use SaveRefreshToken for that.
@@ -75,7 +75,7 @@ func (c *Client) SaveUser(ctx context.Context, u *models.User) error {
 	return err
 }
 
-// SaveRefreshToken writes only the refresh token attribute for a user.
+// SaveRefreshToken writes only the refresh token attribute for an existing user.
 func (c *Client) SaveRefreshToken(ctx context.Context, userID, token string) error {
 	_, err := c.ddb.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 		TableName: aws.String(c.tableName),
@@ -83,12 +83,20 @@ func (c *Client) SaveRefreshToken(ctx context.Context, userID, token string) err
 			"PK": &types.AttributeValueMemberS{Value: pk(userID)},
 			"SK": &types.AttributeValueMemberS{Value: profileSK()},
 		},
-		UpdateExpression: aws.String("SET RefreshToken = :token"),
+		UpdateExpression:    aws.String("SET RefreshToken = :token"),
+		ConditionExpression: aws.String("attribute_exists(PK)"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":token": &types.AttributeValueMemberS{Value: token},
 		},
 	})
-	return err
+	if err != nil {
+		var cfe *types.ConditionalCheckFailedException
+		if errors.As(err, &cfe) {
+			return ErrNotFound
+		}
+		return err
+	}
+	return nil
 }
 
 // LoadRefreshToken reads only the refresh token attribute for a user.
@@ -168,19 +176,26 @@ func (c *Client) ListUsers(ctx context.Context, status *models.UserStatus) ([]mo
 			if err := attributevalue.UnmarshalMap(item, &rec); err != nil {
 				return nil, fmt.Errorf("unmarshal user: %w", err)
 			}
-			users = append(users, *userFromRecord(&rec))
+			u, err := userFromRecord(&rec)
+			if err != nil {
+				return nil, err
+			}
+			users = append(users, *u)
 		}
 	}
 	return users, nil
 }
 
-func userFromRecord(rec *userRecord) *models.User {
+func userFromRecord(rec *userRecord) (*models.User, error) {
 	u := &models.User{
 		UserID: rec.UserID,
 		Email:  rec.Email,
 		Name:   rec.Name,
 		Status: rec.Status,
 	}
-	u.CreatedAt, _ = parseTime(rec.CreatedAt)
-	return u
+	var err error
+	if u.CreatedAt, err = parseTime(rec.CreatedAt); err != nil {
+		return nil, fmt.Errorf("parse user CreatedAt: %w", err)
+	}
+	return u, nil
 }

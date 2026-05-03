@@ -155,7 +155,12 @@ func noteFromItem(item map[string]types.AttributeValue) (*models.Note, error) {
 		S3Key:   rec.S3Key,
 		Version: rec.Version,
 	}
-	n.CreatedAt, _ = parseTime(rec.CreatedAt)
-	n.ModifiedAt, _ = parseTime(rec.ModifiedAt)
+	var err error
+	if n.CreatedAt, err = parseTime(rec.CreatedAt); err != nil {
+		return nil, fmt.Errorf("parse note CreatedAt: %w", err)
+	}
+	if n.ModifiedAt, err = parseTime(rec.ModifiedAt); err != nil {
+		return nil, fmt.Errorf("parse note ModifiedAt: %w", err)
+	}
 	return n, nil
 }

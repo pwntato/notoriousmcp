@@ -49,9 +49,6 @@ func TestUserRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get user: %v", err)
 	}
-	if got == nil {
-		t.Fatal("expected user, got nil")
-	}
 	if got.Email != u.Email {
 		t.Errorf("email: got %q want %q", got.Email, u.Email)
 	}
@@ -325,5 +322,235 @@ func TestListFiles(t *testing.T) {
 	}
 	if len(files) != 2 {
 		t.Errorf("got %d files, want 2", len(files))
+	}
+}
+
+func TestGetUserNotFound(t *testing.T) {
+	c := newTestClient(t)
+	_, err := c.GetUser(context.Background(), "nonexistent-user-xyz")
+	if err != db.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestSaveUserIdempotency(t *testing.T) {
+	c := newTestClient(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	u := &models.User{
+		UserID:    "user-idempotent",
+		Email:     "idem@example.com",
+		Name:      "Idem User",
+		Status:    models.StatusPending,
+		CreatedAt: now,
+	}
+	if err := c.SaveUser(ctx, u); err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+
+	// Second save with a different CreatedAt — should not overwrite
+	u.CreatedAt = now.Add(time.Hour)
+	u.Name = "Updated Name"
+	if err := c.SaveUser(ctx, u); err != nil {
+		t.Fatalf("second save: %v", err)
+	}
+
+	got, err := c.GetUser(ctx, u.UserID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !got.CreatedAt.Equal(now) {
+		t.Errorf("CreatedAt was overwritten: got %v want %v", got.CreatedAt, now)
+	}
+	if got.Name != "Updated Name" {
+		t.Errorf("Name not updated: got %q", got.Name)
+	}
+}
+
+func TestFileVersionConflict(t *testing.T) {
+	c := newTestClient(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	f := &models.File{
+		Path: "conflict.md", UserID: "user-fvc",
+		S3Key: "x", Size: 1, Version: 1,
+		CreatedAt: now, ModifiedAt: now,
+	}
+	if err := c.SaveFile(ctx, f); err != nil {
+		t.Fatalf("save v1: %v", err)
+	}
+	f2 := *f
+	f2.Version = 2
+	if err := c.SaveFile(ctx, &f2); err != nil {
+		t.Fatalf("save v2: %v", err)
+	}
+	// Stale write: still claiming prev=1
+	f3 := *f
+	f3.Version = 2
+	if err := c.SaveFile(ctx, &f3); err != db.ErrVersionConflict {
+		t.Errorf("expected ErrVersionConflict, got %v", err)
+	}
+}
+
+func TestTodoListVersionConflict(t *testing.T) {
+	c := newTestClient(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	l := &models.TodoList{
+		ID: "list-vc", UserID: "user-tlvc",
+		Title: "v1", Version: 1,
+		CreatedAt: now, ModifiedAt: now,
+	}
+	if err := c.SaveTodoList(ctx, l); err != nil {
+		t.Fatalf("save v1: %v", err)
+	}
+	l2 := *l
+	l2.Version = 2
+	if err := c.SaveTodoList(ctx, &l2); err != nil {
+		t.Fatalf("save v2: %v", err)
+	}
+	l3 := *l
+	l3.Version = 2
+	if err := c.SaveTodoList(ctx, &l3); err != db.ErrVersionConflict {
+		t.Errorf("expected ErrVersionConflict, got %v", err)
+	}
+}
+
+func TestTodoVersionConflict(t *testing.T) {
+	c := newTestClient(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	todo := &models.Todo{
+		ID: "todo-vc", ListID: "list-tvc", UserID: "user-tvc",
+		Text: "v1", Status: models.TodoPending, Version: 1,
+		CreatedAt: now, ModifiedAt: now,
+	}
+	if err := c.SaveTodo(ctx, todo); err != nil {
+		t.Fatalf("save v1: %v", err)
+	}
+	t2 := *todo
+	t2.Version = 2
+	if err := c.SaveTodo(ctx, &t2); err != nil {
+		t.Fatalf("save v2: %v", err)
+	}
+	t3 := *todo
+	t3.Version = 2
+	if err := c.SaveTodo(ctx, &t3); err != db.ErrVersionConflict {
+		t.Errorf("expected ErrVersionConflict, got %v", err)
+	}
+}
+
+func TestDeleteTodo(t *testing.T) {
+	c := newTestClient(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	todo := &models.Todo{
+		ID: "todo-del", ListID: "list-del", UserID: "user-tdel",
+		Text: "delete me", Status: models.TodoPending, Version: 1,
+		CreatedAt: now, ModifiedAt: now,
+	}
+	if err := c.SaveTodo(ctx, todo); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if err := c.DeleteTodo(ctx, todo.UserID, todo.ListID, todo.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	_, err := c.GetTodo(ctx, todo.UserID, todo.ListID, todo.ID)
+	if err != db.ErrNotFound {
+		t.Errorf("expected ErrNotFound after delete, got %v", err)
+	}
+}
+
+func TestDeleteTodoList(t *testing.T) {
+	c := newTestClient(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	l := &models.TodoList{
+		ID: "list-del2", UserID: "user-tldel",
+		Title: "delete me", Version: 1,
+		CreatedAt: now, ModifiedAt: now,
+	}
+	if err := c.SaveTodoList(ctx, l); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if err := c.DeleteTodoList(ctx, l.UserID, l.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	_, err := c.GetTodoList(ctx, l.UserID, l.ID)
+	if err != db.ErrNotFound {
+		t.Errorf("expected ErrNotFound after delete, got %v", err)
+	}
+}
+
+func TestListTodoLists(t *testing.T) {
+	c := newTestClient(t)
+	ctx := context.Background()
+
+	userID := "user-list-tl"
+	now := time.Now().UTC()
+	for i := range 3 {
+		l := &models.TodoList{
+			ID: fmt.Sprintf("tl-%d", i), UserID: userID,
+			Title: fmt.Sprintf("List %d", i), Version: 1,
+			CreatedAt: now, ModifiedAt: now,
+		}
+		if err := c.SaveTodoList(ctx, l); err != nil {
+			t.Fatalf("save list %d: %v", i, err)
+		}
+	}
+	lists, err := c.ListTodoLists(ctx, userID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(lists) != 3 {
+		t.Errorf("got %d lists, want 3", len(lists))
+	}
+}
+
+func TestListTodosModifiedSinceScoped(t *testing.T) {
+	c := newTestClient(t)
+	ctx := context.Background()
+
+	userID := "user-todos-ms"
+	now := time.Now().UTC()
+
+	// Two todos in list-a, one in list-b
+	for i := range 2 {
+		todo := &models.Todo{
+			ID: fmt.Sprintf("ms-a-%d", i), ListID: "list-a", UserID: userID,
+			Text: "a", Status: models.TodoPending, Version: 1,
+			CreatedAt: now, ModifiedAt: now,
+		}
+		if err := c.SaveTodo(ctx, todo); err != nil {
+			t.Fatalf("save list-a todo: %v", err)
+		}
+	}
+	todoB := &models.Todo{
+		ID: "ms-b-0", ListID: "list-b", UserID: userID,
+		Text: "b", Status: models.TodoPending, Version: 1,
+		CreatedAt: now, ModifiedAt: now,
+	}
+	if err := c.SaveTodo(ctx, todoB); err != nil {
+		t.Fatalf("save list-b todo: %v", err)
+	}
+
+	since := now.Add(-time.Minute).UTC().Format(time.RFC3339Nano)
+	todos, err := c.ListTodos(ctx, userID, "list-a", since, nil)
+	if err != nil {
+		t.Fatalf("list todos: %v", err)
+	}
+	for _, td := range todos {
+		if td.ListID != "list-a" {
+			t.Errorf("got todo from list %q, want only list-a", td.ListID)
+		}
+	}
+	if len(todos) != 2 {
+		t.Errorf("got %d todos, want 2", len(todos))
 	}
 }
