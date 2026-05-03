@@ -708,3 +708,19 @@ func TestSaveUserPreservesRefreshToken(t *testing.T) {
 		t.Errorf("token was overwritten: got %q want %q", token, "my-token")
 	}
 }
+
+func TestUpdateUserStatusNotFound(t *testing.T) {
+	c := newTestClient(t)
+	err := c.UpdateUserStatus(context.Background(), "nonexistent-"+uid(), models.StatusUser)
+	if !errors.Is(err, db.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestSaveRefreshTokenNotFound(t *testing.T) {
+	c := newTestClient(t)
+	err := c.SaveRefreshToken(context.Background(), "nonexistent-"+uid(), "token")
+	if !errors.Is(err, db.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}

@@ -99,11 +99,10 @@ func (c *Client) SaveTodoList(ctx context.Context, l *models.TodoList) error {
 	return nil
 }
 
-// DeleteTodoList removes a todo list record. Does not cascade-delete todos —
-// orphaned todo items remain in DynamoDB and are still reachable via GetTodo
-// or ListTodos direct SK queries; they become inaccessible only via
-// ListTodoLists. The MCP handler layer is responsible for deleting todos
-// before calling this if orphan-free deletion is required.
+// DeleteTodoList removes a todo list record. Does not cascade-delete todos.
+// Orphaned todo items remain in DynamoDB reachable via GetTodo and ListTodos
+// (SK prefix query), but not via ListTodoLists. Callers must delete associated
+// todos via DeleteTodo before calling this if orphan-free deletion is required.
 func (c *Client) DeleteTodoList(ctx context.Context, userID, listID string) error {
 	_, err := c.ddb.DeleteItem(ctx, &dynamodb.DeleteItemInput{
 		TableName: aws.String(c.tableName),

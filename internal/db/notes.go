@@ -48,6 +48,8 @@ func (c *Client) GetNote(ctx context.Context, userID, noteID string) (*models.No
 // SaveNote upserts note metadata. Version == 1 requires the item to not already
 // exist (attribute_not_exists), preventing silent resurrection of deleted notes.
 // Version > 1 requires the previous version to match (optimistic concurrency).
+// Callers must always set Version from the previously-read value; constructing
+// a struct with Version = 1 for an item that already exists will return ErrVersionConflict.
 func (c *Client) SaveNote(ctx context.Context, n *models.Note) error {
 	modAt := n.ModifiedAt.UTC().Format(isoFormat)
 	input := &dynamodb.PutItemInput{
