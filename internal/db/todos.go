@@ -229,7 +229,11 @@ func (c *Client) DeleteTodo(ctx context.Context, userID, listID, todoID string) 
 }
 
 // ListTodos returns todos for a list, optionally filtered by status or modified since a timestamp.
+// listID must be non-empty; callers are responsible for validating it before calling.
 func (c *Client) ListTodos(ctx context.Context, userID, listID, modifiedSince string, status *models.TodoStatus) ([]models.Todo, error) {
+	if listID == "" {
+		return nil, fmt.Errorf("listID must not be empty")
+	}
 	input := &dynamodb.QueryInput{
 		TableName: aws.String(c.tableName),
 		KeyConditionExpression: aws.String("PK = :pk AND begins_with(SK, :prefix)"),

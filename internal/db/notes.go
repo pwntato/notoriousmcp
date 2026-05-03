@@ -45,8 +45,10 @@ func (c *Client) GetNote(ctx context.Context, userID, noteID string) (*models.No
 	return noteFromItem(out.Item)
 }
 
-// SaveNote upserts note metadata. If version > 0, a conditional write ensures
-// the stored version matches (optimistic concurrency).
+// SaveNote upserts note metadata. Version > 1 triggers a conditional write
+// (optimistic concurrency). Version == 1 is an unconditional first-write; two
+// concurrent first-writes with the same ID will silently overwrite — safe
+// because IDs are caller-supplied UUIDs and collisions are astronomically unlikely.
 func (c *Client) SaveNote(ctx context.Context, n *models.Note) error {
 	modAt := n.ModifiedAt.UTC().Format(isoFormat)
 	input := &dynamodb.PutItemInput{

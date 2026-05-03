@@ -96,7 +96,7 @@ func (c *Client) SaveRefreshToken(ctx context.Context, userID, token string) err
 		if errors.As(err, &cfe) {
 			return ErrNotFound
 		}
-		return err
+		return fmt.Errorf("save refresh token: %w", err)
 	}
 	return nil
 }
@@ -146,7 +146,7 @@ func (c *Client) UpdateUserStatus(ctx context.Context, userID string, status mod
 		if errors.As(err, &cfe) {
 			return ErrNotFound
 		}
-		return err
+		return fmt.Errorf("update user status: %w", err)
 	}
 	return nil
 }
