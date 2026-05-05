@@ -22,7 +22,7 @@ func newTestClient(t *testing.T) *store.Client {
 	}
 	bucket := os.Getenv("S3_BUCKET")
 	if bucket == "" {
-		bucket = "notoriousmcp-local"
+		t.Skip("S3_BUCKET not set; skipping integration test")
 	}
 	c, err := store.New(context.Background(), bucket, endpoint)
 	if err != nil {
