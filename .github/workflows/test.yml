@@ -12,6 +12,10 @@ jobs:
         image: amazon/dynamodb-local:latest
         ports:
           - 8000:8000
+        options: >-
+          --health-cmd "curl -sf http://localhost:8000"
+          --health-interval 5s
+          --health-retries 6
 
     steps:
       - uses: actions/checkout@v4
@@ -50,17 +54,10 @@ jobs:
             -p 9000:9000 \
             -e MINIO_ROOT_USER=localuser \
             -e MINIO_ROOT_PASSWORD=localpassword \
-            -v /tmp/minio-data:/data \
-            minio/minio:latest server /data
+            minio/minio:RELEASE.2025-10-15T17-29-55Z server /data
           for i in $(seq 1 30); do
             aws --endpoint-url http://127.0.0.1:9000 s3 mb s3://notoriousmcp-local 2>/dev/null && break || sleep 1
           done
-          docker logs minio || true
-
-      - name: check services
-        run: |
-          docker ps -a
-          curl -sf http://127.0.0.1:9000/minio/health/live && echo "MinIO up" || echo "MinIO DOWN"
 
       - name: go test
         env:

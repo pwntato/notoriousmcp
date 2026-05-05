@@ -14,8 +14,6 @@ import (
 
 const maxContentBytes = 1 << 20 // 1MB
 
-var ErrTooLarge = errors.New("content exceeds 1MB limit")
-
 // Client wraps the S3 client and bucket name.
 type Client struct {
 	s3     *s3.Client
@@ -73,6 +71,9 @@ func (c *Client) GetContent(ctx context.Context, key string) (string, error) {
 		if errors.As(err, &nsk) {
 			return "", ErrNotFound
 		}
+		// Note: S3 can also return a generic NotFound (e.g. bucket doesn't exist)
+		// which won't match NoSuchKey. In practice this server owns the bucket, so
+		// a missing bucket is a misconfiguration rather than a missing object.
 		return "", fmt.Errorf("get content %q: %w", key, err)
 	}
 	defer func() { _ = out.Body.Close() }()
