@@ -27,7 +27,7 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
         run: |
           aws dynamodb create-table \
-            --endpoint-url http://localhost:8000 \
+            --endpoint-url http://127.0.0.1:8000 \
             --table-name notoriousmcp \
             --attribute-definitions \
               AttributeName=PK,AttributeType=S \
@@ -52,14 +52,14 @@ jobs:
             -e MINIO_ROOT_PASSWORD=local \
             minio/minio:latest server /data
           for i in $(seq 1 30); do
-            aws --endpoint-url http://localhost:9000 s3 mb s3://notoriousmcp-local 2>/dev/null && break || sleep 1
+            aws --endpoint-url http://127.0.0.1:9000 s3 mb s3://notoriousmcp-local 2>/dev/null && break || sleep 1
           done
 
       - name: go test
         env:
-          DYNAMODB_ENDPOINT: http://localhost:8000
+          DYNAMODB_ENDPOINT: http://127.0.0.1:8000
           TABLE_NAME: notoriousmcp
-          S3_ENDPOINT: http://localhost:9000
+          S3_ENDPOINT: http://127.0.0.1:9000
           S3_BUCKET: notoriousmcp-local
           AWS_ACCESS_KEY_ID: local
           AWS_SECRET_ACCESS_KEY: local
