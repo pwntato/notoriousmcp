@@ -55,6 +55,11 @@ jobs:
             aws --endpoint-url http://127.0.0.1:9000 s3 mb s3://notoriousmcp-local 2>/dev/null && break || sleep 1
           done
 
+      - name: check services
+        run: |
+          docker ps -a
+          curl -sf http://127.0.0.1:9000/minio/health/live && echo "MinIO up" || echo "MinIO DOWN"
+
       - name: go test
         env:
           DYNAMODB_ENDPOINT: http://127.0.0.1:8000
