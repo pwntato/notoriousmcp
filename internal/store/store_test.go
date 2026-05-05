@@ -36,17 +36,17 @@ func TestPutAndGet(t *testing.T) {
 	ctx := context.Background()
 
 	key := "test/" + uid()
-	content := "hello, world"
+	t.Cleanup(func() { _ = c.DeleteContent(context.Background(), key) })
 
-	if err := c.PutContent(ctx, key, content); err != nil {
+	if err := c.PutContent(ctx, key, "hello, world"); err != nil {
 		t.Fatalf("put: %v", err)
 	}
 	got, err := c.GetContent(ctx, key)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got != content {
-		t.Errorf("got %q want %q", got, content)
+	if got != "hello, world" {
+		t.Errorf("got %q want %q", got, "hello, world")
 	}
 }
 
@@ -77,10 +77,7 @@ func TestDelete(t *testing.T) {
 
 func TestDeleteIdempotent(t *testing.T) {
 	c := newTestClient(t)
-	ctx := context.Background()
-
-	// Deleting a non-existent key must not error
-	if err := c.DeleteContent(ctx, "nonexistent/"+uid()); err != nil {
+	if err := c.DeleteContent(context.Background(), "nonexistent/"+uid()); err != nil {
 		t.Errorf("delete non-existent: expected nil, got %v", err)
 	}
 }
@@ -90,6 +87,8 @@ func TestPutOverwrites(t *testing.T) {
 	ctx := context.Background()
 
 	key := "test/" + uid()
+	t.Cleanup(func() { _ = c.DeleteContent(context.Background(), key) })
+
 	if err := c.PutContent(ctx, key, "v1"); err != nil {
 		t.Fatalf("put v1: %v", err)
 	}
@@ -107,10 +106,7 @@ func TestPutOverwrites(t *testing.T) {
 
 func TestTooLarge(t *testing.T) {
 	c := newTestClient(t)
-	ctx := context.Background()
-
-	big := strings.Repeat("x", 1<<20+1)
-	err := c.PutContent(ctx, "test/"+uid(), big)
+	err := c.PutContent(context.Background(), "test/"+uid(), strings.Repeat("x", 1<<20+1))
 	if !errors.Is(err, store.ErrTooLarge) {
 		t.Errorf("expected ErrTooLarge, got %v", err)
 	}
@@ -121,6 +117,8 @@ func TestRoundTripUnicode(t *testing.T) {
 	ctx := context.Background()
 
 	key := "test/" + uid()
+	t.Cleanup(func() { _ = c.DeleteContent(context.Background(), key) })
+
 	content := "# 日本語\n\nHello 🌍\n"
 	if err := c.PutContent(ctx, key, content); err != nil {
 		t.Fatalf("put: %v", err)

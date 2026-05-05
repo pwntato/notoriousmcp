@@ -29,6 +29,8 @@ jobs:
           for i in $(seq 1 20); do
             aws dynamodb list-tables --endpoint-url http://127.0.0.1:8000 2>/dev/null && break || sleep 1
           done
+          aws dynamodb list-tables --endpoint-url http://127.0.0.1:8000 > /dev/null || \
+            (echo "DynamoDB Local did not become ready in time"; exit 1)
           aws dynamodb create-table \
             --endpoint-url http://127.0.0.1:8000 \
             --table-name notoriousmcp \
@@ -57,6 +59,8 @@ jobs:
           for i in $(seq 1 30); do
             aws --endpoint-url http://127.0.0.1:9000 s3 mb s3://notoriousmcp-local 2>/dev/null && break || sleep 1
           done
+          aws --endpoint-url http://127.0.0.1:9000 s3 ls s3://notoriousmcp-local > /dev/null || \
+            (echo "MinIO bucket init failed"; docker logs minio; exit 1)
 
       - name: go test
         env:
