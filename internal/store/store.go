@@ -32,7 +32,10 @@ func New(ctx context.Context, bucket, endpoint string) (*Client, error) {
 	if endpoint != "" {
 		s3Opts = append(s3Opts, func(o *s3.Options) {
 			o.BaseEndpoint = &endpoint
-			o.UsePathStyle = true // MinIO requires path-style addressing
+			// Path-style addressing is required by MinIO and other S3-compatible
+			// stores. Intentionally gated on endpoint override — real AWS S3 uses
+			// virtual-hosted style and path-style is deprecated there.
+			o.UsePathStyle = true
 		})
 	}
 
