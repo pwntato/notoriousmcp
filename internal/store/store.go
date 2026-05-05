@@ -75,7 +75,7 @@ func (c *Client) GetContent(ctx context.Context, key string) (string, error) {
 		}
 		return "", fmt.Errorf("get content %q: %w", key, err)
 	}
-	defer out.Body.Close()
+	defer func() { _ = out.Body.Close() }()
 
 	// Guard against oversized objects that shouldn't exist but could if
 	// someone wrote directly to the bucket bypassing the API.
