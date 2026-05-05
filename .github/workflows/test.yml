@@ -12,10 +12,6 @@ jobs:
         image: amazon/dynamodb-local:latest
         ports:
           - 8000:8000
-        options: >-
-          --health-cmd "curl -sf http://localhost:8000"
-          --health-interval 5s
-          --health-retries 6
 
     steps:
       - uses: actions/checkout@v4
@@ -30,6 +26,9 @@ jobs:
           AWS_SECRET_ACCESS_KEY: localpassword
           AWS_DEFAULT_REGION: us-east-1
         run: |
+          for i in $(seq 1 20); do
+            aws dynamodb list-tables --endpoint-url http://127.0.0.1:8000 2>/dev/null && break || sleep 1
+          done
           aws dynamodb create-table \
             --endpoint-url http://127.0.0.1:8000 \
             --table-name notoriousmcp \
