@@ -42,14 +42,14 @@ jobs:
 
       - name: start MinIO and init bucket
         env:
-          AWS_ACCESS_KEY_ID: minioadmin
-          AWS_SECRET_ACCESS_KEY: minioadmin
+          AWS_ACCESS_KEY_ID: local
+          AWS_SECRET_ACCESS_KEY: local
           AWS_DEFAULT_REGION: us-east-1
         run: |
           docker run -d --name minio \
             -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin \
-            -e MINIO_ROOT_PASSWORD=minioadmin \
+            -e MINIO_ROOT_USER=local \
+            -e MINIO_ROOT_PASSWORD=local \
             minio/minio server /data
           until curl -sf http://localhost:9000/minio/health/live; do sleep 1; done
           aws --endpoint-url http://localhost:9000 s3 mb s3://notoriousmcp-local
