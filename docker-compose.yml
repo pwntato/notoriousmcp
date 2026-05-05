@@ -11,8 +11,8 @@ services:
       - "9000:9000"
       - "9001:9001"
     environment:
-      MINIO_ROOT_USER: local
-      MINIO_ROOT_PASSWORD: local
+      MINIO_ROOT_USER: localuser
+      MINIO_ROOT_PASSWORD: localpassword
     command: server /data --console-address ":9001"
 
   init:
@@ -22,8 +22,8 @@ services:
       - minio
     env_file: .env
     environment:
-      AWS_ACCESS_KEY_ID: local
-      AWS_SECRET_ACCESS_KEY: local
+      AWS_ACCESS_KEY_ID: localuser
+      AWS_SECRET_ACCESS_KEY: localpassword
       AWS_DEFAULT_REGION: us-east-1
     entrypoint: /bin/sh
     command: >-
@@ -62,8 +62,8 @@ services:
       S3_BUCKET: notoriousmcp-local
       TABLE_NAME: notoriousmcp
       ENVIRONMENT: local
-      AWS_ACCESS_KEY_ID: local
-      AWS_SECRET_ACCESS_KEY: local
+      AWS_ACCESS_KEY_ID: localuser
+      AWS_SECRET_ACCESS_KEY: localpassword
       AWS_DEFAULT_REGION: us-east-1
     depends_on:
       init:

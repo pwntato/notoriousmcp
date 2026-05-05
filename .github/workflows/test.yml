@@ -42,14 +42,14 @@ jobs:
 
       - name: start MinIO and init bucket
         env:
-          AWS_ACCESS_KEY_ID: local
-          AWS_SECRET_ACCESS_KEY: local
+          AWS_ACCESS_KEY_ID: localuser
+          AWS_SECRET_ACCESS_KEY: localpassword
           AWS_DEFAULT_REGION: us-east-1
         run: |
           docker run -d --name minio \
             -p 9000:9000 \
-            -e MINIO_ROOT_USER=local \
-            -e MINIO_ROOT_PASSWORD=local \
+            -e MINIO_ROOT_USER=localuser \
+            -e MINIO_ROOT_PASSWORD=localpassword \
             -v /tmp/minio-data:/data \
             minio/minio:latest server /data
           for i in $(seq 1 30); do
@@ -68,8 +68,8 @@ jobs:
           TABLE_NAME: notoriousmcp
           S3_ENDPOINT: http://127.0.0.1:9000
           S3_BUCKET: notoriousmcp-local
-          AWS_ACCESS_KEY_ID: local
-          AWS_SECRET_ACCESS_KEY: local
+          AWS_ACCESS_KEY_ID: localuser
+          AWS_SECRET_ACCESS_KEY: localpassword
           AWS_DEFAULT_REGION: us-east-1
         run: go test ./...
 
