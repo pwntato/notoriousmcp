@@ -51,7 +51,9 @@ jobs:
             -e MINIO_ROOT_USER=local \
             -e MINIO_ROOT_PASSWORD=local \
             minio/minio server /data
-          until curl -sf http://localhost:9000/minio/health/live; do sleep 1; done
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:9000/minio/health/live && break || sleep 1
+          done
           aws --endpoint-url http://localhost:9000 s3 mb s3://notoriousmcp-local
 
       - name: go test
