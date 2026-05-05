@@ -50,10 +50,12 @@ jobs:
             -p 9000:9000 \
             -e MINIO_ROOT_USER=local \
             -e MINIO_ROOT_PASSWORD=local \
+            -v /tmp/minio-data:/data \
             minio/minio:latest server /data
           for i in $(seq 1 30); do
             aws --endpoint-url http://127.0.0.1:9000 s3 mb s3://notoriousmcp-local 2>/dev/null && break || sleep 1
           done
+          docker logs minio || true
 
       - name: check services
         run: |
