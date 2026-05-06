@@ -38,13 +38,17 @@ func IssueAccessToken(secret []byte, userID string) (string, error) {
 // ValidateAccessToken validates the token and returns the user ID if valid.
 func ValidateAccessToken(secret []byte, token string) (string, error) {
 	parts := strings.SplitN(token, ".", 2)
-	if len(parts) != 2 {
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return "", ErrInvalidToken
 	}
 	encoded, sig := parts[0], parts[1]
-	if sign(secret, encoded) != sig {
+
+	// Use hmac.Equal for timing-safe comparison to resist timing attacks.
+	expected := sign(secret, encoded)
+	if !hmac.Equal([]byte(expected), []byte(sig)) {
 		return "", ErrInvalidToken
 	}
+
 	payload, err := base64.RawURLEncoding.DecodeString(encoded)
 	if err != nil {
 		return "", ErrInvalidToken
@@ -61,7 +65,8 @@ func ValidateAccessToken(secret []byte, token string) (string, error) {
 
 func sign(secret []byte, data string) string {
 	mac := hmac.New(sha256.New, secret)
-	mac.Write([]byte(data))
+	// hmac.Hash.Write never returns an error for in-memory operations.
+	_, _ = mac.Write([]byte(data))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 

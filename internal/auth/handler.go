@@ -2,9 +2,12 @@ package auth
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -15,6 +18,7 @@ import (
 	"github.com/pwntato/notoriousmcp/internal/db"
 	"github.com/pwntato/notoriousmcp/internal/models"
 )
+
 
 // Handler implements the OAuth 2.0 endpoints.
 type Handler struct {
@@ -45,55 +49,88 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /auth/callback", h.callback)
 }
 
-// wellKnown serves the OAuth 2.0 authorization server metadata required by the MCP spec.
-func (h *Handler) wellKnown(w http.ResponseWriter, r *http.Request) {
-	// Derive the server base URL from the request so it works on any deployment.
-	scheme := "https"
-	if r.TLS == nil && r.Header.Get("X-Forwarded-Proto") == "" {
-		scheme = "http"
-	} else if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
-		scheme = proto
+// requestScheme returns https when the request arrived over TLS or via a
+// trusted proxy that set X-Forwarded-Proto. Falls back to http for local dev.
+func requestScheme(r *http.Request) string {
+	if r.TLS != nil {
+		return "https"
 	}
-	base := scheme + "://" + r.Host
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto == "https" {
+		return "https"
+	}
+	return "http"
+}
 
+// wellKnown serves the OAuth 2.0 authorization server metadata required by the MCP spec.
+// token_endpoint is intentionally omitted until issue #4 implements it.
+func (h *Handler) wellKnown(w http.ResponseWriter, r *http.Request) {
+	base := requestScheme(r) + "://" + r.Host
 	meta := map[string]any{
-		"issuer":                                base,
-		"authorization_endpoint":               base + "/auth/login",
-		"token_endpoint":                        base + "/auth/token",
-		"response_types_supported":             []string{"code"},
-		"grant_types_supported":                []string{"authorization_code"},
-		"code_challenge_methods_supported":     []string{"S256"},
+		"issuer":                   base,
+		"authorization_endpoint":   base + "/auth/login",
+		"response_types_supported": []string{"code"},
+		"grant_types_supported":    []string{"authorization_code"},
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(meta)
 }
 
+// oauthStatePayload is the data packed into the Google state parameter.
+type oauthStatePayload struct {
+	Nonce             string `json:"n"`
+	ClientRedirectURI string `json:"r"`
+	ClientState       string `json:"s"`
+}
+
 // login initiates the OAuth flow by redirecting to Google.
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
-	state, err := generateState()
+	clientRedirectURI := r.URL.Query().Get("redirect_uri")
+
+	// Validate redirect_uri against the configured redirect URL origin to
+	// prevent open-redirect attacks.
+	if clientRedirectURI != "" {
+		if err := ValidateRedirectURI(h.cfg.RedirectURL, clientRedirectURI); err != nil {
+			http.Error(w, "invalid redirect_uri", http.StatusBadRequest)
+			return
+		}
+	}
+
+	nonce, err := generateState()
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	// Store state in a short-lived cookie for CSRF validation on callback.
+	// Encode state payload as base64 JSON to avoid delimiter fragility.
+	payload := oauthStatePayload{
+		Nonce:             nonce,
+		ClientRedirectURI: clientRedirectURI,
+		ClientState:       r.URL.Query().Get("state"),
+	}
+	stateJSON, err := json.Marshal(payload)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	stateEncoded := base64.RawURLEncoding.EncodeToString(stateJSON)
+
+	// Store nonce in a short-lived httpOnly cookie for CSRF validation.
+	secure := requestScheme(r) == "https"
 	http.SetCookie(w, &http.Cookie{
-		Name:     "oauth_state",
-		Value:    state,
+		Name:     "oauth_nonce",
+		Value:    nonce,
 		Path:     "/auth",
 		MaxAge:   600,
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})
 
-	// Preserve the MCP client's redirect_uri and state across the Google round-trip.
-	clientRedirectURI := r.URL.Query().Get("redirect_uri")
-	clientState := r.URL.Query().Get("state")
-	combinedState := state + "|" + clientRedirectURI + "|" + clientState
-
-	url := h.oauthCfg.AuthCodeURL(combinedState, oauth2.AccessTypeOffline, oauth2.ApprovalForce)
-	http.Redirect(w, r, url, http.StatusFound)
+	// AccessTypeOffline requests a refresh token. Google only returns one on
+	// first authorization (or re-grant), so we don't need ApprovalForce.
+	// upsertUser only stores the token when Google actually returns one.
+	authURL := h.oauthCfg.AuthCodeURL(stateEncoded, oauth2.AccessTypeOffline)
+	http.Redirect(w, r, authURL, http.StatusFound)
 }
 
 // callback handles the Google OAuth callback, exchanges the code for tokens,
@@ -101,23 +138,29 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// Validate state to prevent CSRF.
-	cookie, err := r.Cookie("oauth_state")
+	// Decode state payload.
+	stateEncoded := r.URL.Query().Get("state")
+	stateJSON, err := base64.RawURLEncoding.DecodeString(stateEncoded)
 	if err != nil {
-		http.Error(w, "missing state cookie", http.StatusBadRequest)
-		return
-	}
-	rawState := r.URL.Query().Get("state")
-	parts := strings.SplitN(rawState, "|", 3)
-	if len(parts) != 3 || parts[0] != cookie.Value {
 		http.Error(w, "invalid state", http.StatusBadRequest)
 		return
 	}
-	clientRedirectURI, clientState := parts[1], parts[2]
+	var payload oauthStatePayload
+	if err := json.Unmarshal(stateJSON, &payload); err != nil {
+		http.Error(w, "invalid state", http.StatusBadRequest)
+		return
+	}
 
-	// Clear the state cookie.
+	// Validate nonce against cookie to prevent CSRF.
+	cookie, err := r.Cookie("oauth_nonce")
+	if err != nil || cookie.Value != payload.Nonce {
+		http.Error(w, "invalid state", http.StatusBadRequest)
+		return
+	}
+
+	// Clear the nonce cookie.
 	http.SetCookie(w, &http.Cookie{
-		Name:   "oauth_state",
+		Name:   "oauth_nonce",
 		Path:   "/auth",
 		MaxAge: -1,
 	})
@@ -155,10 +198,9 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Redirect back to MCP client with the access token.
-	redirectURL := clientRedirectURI
-	if redirectURL == "" {
-		// No client redirect — return token as JSON (useful for testing).
+	// Redirect back to MCP client, or return JSON if no redirect URI.
+	clientRedirectURI := payload.ClientRedirectURI
+	if clientRedirectURI == "" {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token": accessToken,
@@ -169,14 +211,31 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sep := "?"
-	if strings.Contains(redirectURL, "?") {
+	if strings.Contains(clientRedirectURI, "?") {
 		sep = "&"
 	}
-	target := redirectURL + sep + "code=" + accessToken
-	if clientState != "" {
-		target += "&state=" + clientState
+	target := clientRedirectURI + sep + "code=" + accessToken
+	if payload.ClientState != "" {
+		target += "&state=" + url.QueryEscape(payload.ClientState)
 	}
 	http.Redirect(w, r, target, http.StatusFound)
+}
+
+// ValidateRedirectURI ensures the client redirect URI shares the same origin
+// as the server's configured redirect URL to prevent open-redirect attacks.
+func ValidateRedirectURI(configuredRedirectURL, clientRedirectURI string) error {
+	configured, err := url.Parse(configuredRedirectURL)
+	if err != nil {
+		return fmt.Errorf("invalid configured redirect URL: %w", err)
+	}
+	client, err := url.Parse(clientRedirectURI)
+	if err != nil {
+		return fmt.Errorf("invalid redirect_uri: %w", err)
+	}
+	if configured.Scheme != client.Scheme || configured.Host != client.Host {
+		return fmt.Errorf("redirect_uri origin %q not allowed", client.Host)
+	}
+	return nil
 }
 
 type googleUserInfo struct {
@@ -207,7 +266,7 @@ func fetchGoogleUserInfo(ctx context.Context, client *http.Client) (*googleUserI
 // upsertUser creates or updates the user record and applies the admin bootstrap rule.
 func (h *Handler) upsertUser(ctx context.Context, info *googleUserInfo, refreshToken string) error {
 	existing, err := h.db.GetUser(ctx, info.Sub)
-	if err != nil && err != db.ErrNotFound {
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
 		return fmt.Errorf("get user: %w", err)
 	}
 
@@ -237,8 +296,8 @@ func (h *Handler) upsertUser(ctx context.Context, info *googleUserInfo, refreshT
 		return fmt.Errorf("save user: %w", err)
 	}
 
-	// Only update the refresh token if Google returned one (it's only returned
-	// on first authorization or when access is re-granted).
+	// Only update the refresh token if Google returned one (only on first
+	// authorization or when the user re-grants access).
 	if refreshToken != "" {
 		if err := h.db.SaveRefreshToken(ctx, info.Sub, refreshToken); err != nil {
 			return fmt.Errorf("save refresh token: %w", err)

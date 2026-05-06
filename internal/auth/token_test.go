@@ -2,7 +2,6 @@ package auth_test
 
 import (
 	"testing"
-	"time"
 
 	"github.com/pwntato/notoriousmcp/internal/auth"
 )
@@ -15,7 +14,6 @@ func TestAccessTokenRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
-
 	got, err := auth.ValidateAccessToken(secret, token)
 	if err != nil {
 		t.Fatalf("validate: %v", err)
@@ -36,6 +34,7 @@ func TestAccessTokenWrongSecret(t *testing.T) {
 func TestAccessTokenTampered(t *testing.T) {
 	secret := []byte("test-secret")
 	token, _ := auth.IssueAccessToken(secret, "user-1")
+	// Replace last 4 chars of signature with garbage.
 	tampered := token[:len(token)-4] + "XXXX"
 	_, err := auth.ValidateAccessToken(secret, tampered)
 	if err != auth.ErrInvalidToken {
@@ -43,28 +42,37 @@ func TestAccessTokenTampered(t *testing.T) {
 	}
 }
 
-func TestAccessTokenExpired(t *testing.T) {
-	// Can't easily test expiry without mocking time, so just verify the
-	// happy path includes an expiry well in the future.
-	secret := []byte("test-secret")
-	token, err := auth.IssueAccessToken(secret, "user-1")
-	if err != nil {
-		t.Fatalf("issue: %v", err)
-	}
-	// Token should be valid right after issuance.
-	_, err = auth.ValidateAccessToken(secret, token)
-	if err != nil {
-		t.Errorf("fresh token should be valid, got %v", err)
-	}
-	_ = time.Now() // satisfy import
-}
-
 func TestAccessTokenMalformed(t *testing.T) {
 	secret := []byte("test-secret")
-	for _, bad := range []string{"", "notavalidtoken", "a.b.c"} {
+	cases := []string{
+		"",          // empty
+		"nodot",     // no separator
+		".",         // empty payload and sig
+		"validbase64AAAA.", // valid base64 payload, empty sig
+	}
+	for _, bad := range cases {
 		_, err := auth.ValidateAccessToken(secret, bad)
 		if err != auth.ErrInvalidToken {
 			t.Errorf("input %q: expected ErrInvalidToken, got %v", bad, err)
+		}
+	}
+}
+
+func TestValidateRedirectURI(t *testing.T) {
+	cases := []struct {
+		configured string
+		client     string
+		wantErr    bool
+	}{
+		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback", false},
+		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/other", false}, // same origin, different path
+		{"https://notoriousmcp.com/auth/callback", "https://evil.com/steal", true},
+		{"https://notoriousmcp.com/auth/callback", "http://notoriousmcp.com/auth/callback", true}, // scheme mismatch
+	}
+	for _, tc := range cases {
+		err := auth.ValidateRedirectURI(tc.configured, tc.client)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("ValidateRedirectURI(%q, %q): err=%v wantErr=%v", tc.configured, tc.client, err, tc.wantErr)
 		}
 	}
 }
