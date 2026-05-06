@@ -255,12 +255,14 @@ func ValidateRedirectURI(configuredRedirectURL, clientRedirectURI string) error 
 	if err != nil {
 		return fmt.Errorf("invalid redirect_uri: %w", err)
 	}
-	// Clean paths to neutralise traversal sequences before prefix comparison.
+	// Clean paths to neutralise traversal sequences before comparison.
+	// Require exact match or a sub-path (prefix + "/") to prevent
+	// /auth/callback-extra from matching /auth/callback.
 	configuredPath := path.Clean(configured.Path)
 	clientPath := path.Clean(client.Path)
-	if configured.Scheme != client.Scheme ||
-		configured.Host != client.Host ||
-		!strings.HasPrefix(clientPath, configuredPath) {
+	sameOrigin := configured.Scheme == client.Scheme && configured.Host == client.Host
+	exactOrSub := clientPath == configuredPath || strings.HasPrefix(clientPath, configuredPath+"/")
+	if !sameOrigin || !exactOrSub {
 		return fmt.Errorf("redirect_uri %q not allowed", clientRedirectURI)
 	}
 	return nil

@@ -85,6 +85,10 @@ func TestValidateRedirectURI(t *testing.T) {
 		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/other", true},
 		// Path traversal attempt — rejected
 		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback/../../steal", true},
+		// Prefix boundary: /auth/callback-extra must not match /auth/callback
+		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback-extra", true},
+		// Sub-path is allowed
+		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback/sub", false},
 	}
 	for _, tc := range cases {
 		err := auth.ValidateRedirectURI(tc.configured, tc.client)

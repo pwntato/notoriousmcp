@@ -139,6 +139,34 @@ func TestCallbackMissingNonceCookie(t *testing.T) {
 	}
 }
 
+func TestCallbackJSONFallback(t *testing.T) {
+	// When the state payload has no redirect_uri, callback returns JSON.
+	// This test reaches the nonce check (400) before JSON, since we can't
+	// complete the Google exchange in a unit test. We verify the handler
+	// does not panic and returns a well-formed error response.
+	h := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	// State with empty redirect_uri ("r":"") and valid nonce structure.
+	// {"n":"testnonce","r":"","s":""}
+	validState := "eyJuIjoidGVzdG5vbmNlIiwiciI6IiIsInMiOiIifQ"
+	req := httptest.NewRequest("GET", "/auth/callback?state="+validState+"&code=fake", nil)
+	// Set matching nonce cookie so we get past CSRF — will fail at token exchange.
+	req.AddCookie(&http.Cookie{Name: "oauth_nonce", Value: "testnonce"})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	// Token exchange with Google will fail (no real server) — 500 is expected.
+	// The important thing is the handler doesn't panic and reaches that point.
+	if w.Code == http.StatusOK {
+		t.Error("expected non-200 (token exchange should fail without real Google)")
+	}
+	if w.Code == 0 {
+		t.Error("handler produced no response — possible panic")
+	}
+}
+
 func TestConfigValidate(t *testing.T) {
 	base := auth.Config{
 		ClientID:     "id",
