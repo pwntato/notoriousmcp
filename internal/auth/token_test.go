@@ -42,7 +42,7 @@ func TestAccessTokenTampered(t *testing.T) {
 }
 
 func TestAccessTokenExpired(t *testing.T) {
-	secret := []byte("test-secret")
+	secret := []byte("test-secret-key-at-least-32-bytes!!")
 	token, err := auth.IssueExpiredToken(secret, "user-1")
 	if err != nil {
 		t.Fatalf("issue expired: %v", err)
@@ -91,6 +91,8 @@ func TestValidateRedirectURI(t *testing.T) {
 		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback/sub", true},
 		// Trailing slash normalised by path.Clean — treated as equivalent
 		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback/", false},
+		// Query string on client URI — path comparison ignores query, so allowed
+		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback?foo=bar", false},
 	}
 	for _, tc := range cases {
 		err := auth.ValidateRedirectURI(tc.configured, tc.client)

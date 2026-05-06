@@ -308,8 +308,10 @@ func fetchGoogleUserInfo(ctx context.Context, client *http.Client) (*googleUserI
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("userinfo status %d", resp.StatusCode)
 	}
+	// Limit response size — Google's userinfo payload is tiny but defense-in-depth.
+	limited := http.MaxBytesReader(nil, resp.Body, 64*1024)
 	var info googleUserInfo
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+	if err := json.NewDecoder(limited).Decode(&info); err != nil {
 		return nil, fmt.Errorf("userinfo decode: %w", err)
 	}
 	if info.Sub == "" {
@@ -320,11 +322,11 @@ func fetchGoogleUserInfo(ctx context.Context, client *http.Client) (*googleUserI
 
 // upsertUser creates or updates the user record and applies the admin bootstrap rule.
 // Note: GetUser → SaveUser is a non-atomic read-modify-write. Two concurrent
-// first-logins race safely because: (a) SaveUser uses if_not_exists(CreatedAt)
-// so CreatedAt is never overwritten, and (b) both concurrent reads return
-// ErrNotFound, both set status=pending, so both writes produce the same result.
-// A non-admin user whose status was already set won't be overwritten because the
-// changed check skips the write when status/email/name haven't changed.
+// first-logins race safely: (a) SaveUser uses if_not_exists(CreatedAt) so
+// CreatedAt is never overwritten, (b) both concurrent reads return ErrNotFound,
+// both set status=pending (or status=admin for AdminGoogleIDs users), so both
+// writes produce the same result. Subsequent logins skip the write entirely when
+// status/email/name haven't changed, so they are also idempotent.
 func (h *Handler) upsertUser(ctx context.Context, info *googleUserInfo, refreshToken string) error {
 	existing, err := h.db.GetUser(ctx, info.Sub)
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
