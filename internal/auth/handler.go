@@ -27,10 +27,10 @@ type Handler struct {
 	oauthCfg *oauth2.Config
 }
 
-// New creates an auth Handler. Panics if TokenSecret is empty.
+// New creates an auth Handler. cfg must pass Validate() before calling New.
 func New(cfg Config, dbClient *db.Client) *Handler {
-	if len(cfg.TokenSecret) == 0 {
-		panic("auth.Config.TokenSecret must not be empty")
+	if err := cfg.Validate(); err != nil {
+		panic("invalid auth config: " + err.Error())
 	}
 	return &Handler{
 		cfg: cfg,
@@ -121,6 +121,12 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	stateEncoded := base64.RawURLEncoding.EncodeToString(stateJSON)
 
 	// Store nonce in a short-lived httpOnly cookie for CSRF validation.
+	// Secure is set based on requestScheme — always true in production behind CloudFront.
+	// Note: oauthStatePayload (redirect_uri + client state) is base64-encoded, not
+	// encrypted — it is visible to the browser. It contains no secrets; the nonce is
+	// the only security-critical value and it is validated separately via this cookie.
+	// PKCE (RFC 7636) is not enforced here. If public/native MCP clients are supported
+	// in future, add PKCE via oauth2.S256ChallengeOption before deploying to them.
 	secure := requestScheme(r) == "https"
 	http.SetCookie(w, &http.Cookie{
 		Name:     "oauth_nonce",
@@ -204,9 +210,14 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Redirect back to MCP client, or return JSON if no redirect URI.
+	// If the login request included a redirect_uri, send the token there.
+	// Otherwise fall back to returning JSON directly (useful for CLI/testing).
+	// Known limitation: tokens are stateless with a 1h TTL. Revoking a user's
+	// access (DB status change, removal from AdminGoogleIDs) does not invalidate
+	// already-issued tokens — they remain valid until expiry.
 	clientRedirectURI := payload.ClientRedirectURI
 	if clientRedirectURI == "" {
+		// Explicit JSON fallback — not an error condition.
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token": accessToken,
@@ -305,15 +316,23 @@ func (h *Handler) upsertUser(ctx context.Context, info *googleUserInfo, refreshT
 		createdAt = existing.CreatedAt
 	}
 
-	u := &models.User{
-		UserID:    info.Sub,
-		Email:     info.Email,
-		Name:      info.Name,
-		Status:    status,
-		CreatedAt: createdAt,
-	}
-	if err := h.db.SaveUser(ctx, u); err != nil {
-		return fmt.Errorf("save user: %w", err)
+	// Skip the write if nothing has changed — avoids an unconditional DB write
+	// on every login for users whose profile is already current.
+	changed := existing == nil ||
+		existing.Status != status ||
+		existing.Email != info.Email ||
+		existing.Name != info.Name
+	if changed {
+		u := &models.User{
+			UserID:    info.Sub,
+			Email:     info.Email,
+			Name:      info.Name,
+			Status:    status,
+			CreatedAt: createdAt,
+		}
+		if err := h.db.SaveUser(ctx, u); err != nil {
+			return fmt.Errorf("save user: %w", err)
+		}
 	}
 
 	// Only update the refresh token if Google returned one (only on first

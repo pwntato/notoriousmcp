@@ -1,11 +1,30 @@
 package auth
 
+import "fmt"
+
 // Config holds OAuth credentials and server settings needed by the auth layer.
-// All fields must be populated before calling New.
+// Call Validate() before passing to New().
 type Config struct {
 	ClientID       string
 	ClientSecret   string
 	RedirectURL    string   // e.g. https://notoriousmcp.com/auth/callback
-	AdminGoogleIDs []string // subject IDs that are always promoted to admin
-	TokenSecret    []byte   // HMAC secret for signing access tokens
+	AdminGoogleIDs []string // subject IDs that are always promoted to admin on login
+	TokenSecret    []byte   // HMAC-SHA256 secret for signing access tokens; min 32 bytes
+}
+
+// Validate returns an error if any required field is missing or too short.
+func (c Config) Validate() error {
+	if c.ClientID == "" {
+		return fmt.Errorf("auth.Config.ClientID is required")
+	}
+	if c.ClientSecret == "" {
+		return fmt.Errorf("auth.Config.ClientSecret is required")
+	}
+	if c.RedirectURL == "" {
+		return fmt.Errorf("auth.Config.RedirectURL is required")
+	}
+	if len(c.TokenSecret) < 32 {
+		return fmt.Errorf("auth.Config.TokenSecret must be at least 32 bytes (got %d)", len(c.TokenSecret))
+	}
+	return nil
 }
