@@ -45,6 +45,8 @@ func TestWellKnown(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&meta); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
+	// Expects http:// even though TrustProxy: true — no X-Forwarded-Proto header
+	// is set in this request, so scheme falls back to http (no TLS, no header).
 	if meta["issuer"] != "http://example.com" {
 		t.Errorf("issuer: got %v", meta["issuer"])
 	}
@@ -74,6 +76,37 @@ func TestWellKnownXForwardedProto(t *testing.T) {
 	}
 	if meta["issuer"] != "https://example.com" {
 		t.Errorf("issuer with X-Forwarded-Proto: got %v want https://example.com", meta["issuer"])
+	}
+}
+
+func TestWellKnownXForwardedProtoIgnoredWithoutTrustProxy(t *testing.T) {
+	// When TrustProxy is false, X-Forwarded-Proto must be ignored even if present.
+	// This is the security boundary: a direct-to-internet deployment must not
+	// allow a caller to spoof the scheme via this header.
+	cfg := auth.Config{
+		ClientID:     "test-client-id",
+		ClientSecret: "test-client-secret",
+		RedirectURL:  "https://example.com/auth/callback",
+		TokenSecret:  []byte("test-secret-key-at-least-32-bytes!!"),
+		TrustProxy:   false,
+	}
+	h := auth.New(cfg, nil)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/.well-known/oauth-authorization-server", nil)
+	req.Host = "example.com"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	var meta map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&meta); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// Must be http:// — header should be ignored when TrustProxy is false.
+	if meta["issuer"] != "http://example.com" {
+		t.Errorf("issuer with TrustProxy=false: got %v want http://example.com", meta["issuer"])
 	}
 }
 
