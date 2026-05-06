@@ -34,7 +34,6 @@ func TestAccessTokenWrongSecret(t *testing.T) {
 func TestAccessTokenTampered(t *testing.T) {
 	secret := []byte("test-secret")
 	token, _ := auth.IssueAccessToken(secret, "user-1")
-	// Replace last 4 chars of signature with garbage.
 	tampered := token[:len(token)-4] + "XXXX"
 	_, err := auth.ValidateAccessToken(secret, tampered)
 	if err != auth.ErrInvalidToken {
@@ -42,13 +41,25 @@ func TestAccessTokenTampered(t *testing.T) {
 	}
 }
 
+func TestAccessTokenExpired(t *testing.T) {
+	secret := []byte("test-secret")
+	token, err := auth.IssueExpiredToken(secret, "user-1")
+	if err != nil {
+		t.Fatalf("issue expired: %v", err)
+	}
+	_, err = auth.ValidateAccessToken(secret, token)
+	if err != auth.ErrInvalidToken {
+		t.Errorf("expected ErrInvalidToken for expired token, got %v", err)
+	}
+}
+
 func TestAccessTokenMalformed(t *testing.T) {
 	secret := []byte("test-secret")
 	cases := []string{
-		"",          // empty
-		"nodot",     // no separator
-		".",         // empty payload and sig
-		"validbase64AAAA.", // valid base64 payload, empty sig
+		"",                 // empty
+		"nodot",            // no separator
+		".",                // empty payload and sig
+		"validbase64AAAA.", // non-empty payload, empty sig
 	}
 	for _, bad := range cases {
 		_, err := auth.ValidateAccessToken(secret, bad)
@@ -64,10 +75,16 @@ func TestValidateRedirectURI(t *testing.T) {
 		client     string
 		wantErr    bool
 	}{
+		// Exact match — always allowed
 		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback", false},
-		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/other", false}, // same origin, different path
+		// Different host — rejected
 		{"https://notoriousmcp.com/auth/callback", "https://evil.com/steal", true},
-		{"https://notoriousmcp.com/auth/callback", "http://notoriousmcp.com/auth/callback", true}, // scheme mismatch
+		// Scheme mismatch — rejected
+		{"https://notoriousmcp.com/auth/callback", "http://notoriousmcp.com/auth/callback", true},
+		// Path outside configured prefix — rejected
+		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/other", true},
+		// Path traversal attempt — rejected
+		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback/../../steal", true},
 	}
 	for _, tc := range cases {
 		err := auth.ValidateRedirectURI(tc.configured, tc.client)

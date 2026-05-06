@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path"
 	"slices"
 	"strings"
 	"time"
@@ -19,7 +20,6 @@ import (
 	"github.com/pwntato/notoriousmcp/internal/models"
 )
 
-
 // Handler implements the OAuth 2.0 endpoints.
 type Handler struct {
 	cfg      Config
@@ -27,8 +27,11 @@ type Handler struct {
 	oauthCfg *oauth2.Config
 }
 
-// New creates an auth Handler.
+// New creates an auth Handler. Panics if TokenSecret is empty.
 func New(cfg Config, dbClient *db.Client) *Handler {
+	if len(cfg.TokenSecret) == 0 {
+		panic("auth.Config.TokenSecret must not be empty")
+	}
 	return &Handler{
 		cfg: cfg,
 		db:  dbClient,
@@ -50,7 +53,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 }
 
 // requestScheme returns https when the request arrived over TLS or via a
-// trusted proxy that set X-Forwarded-Proto. Falls back to http for local dev.
+// reverse proxy that set X-Forwarded-Proto. Falls back to http for local dev.
+// Note: X-Forwarded-Proto is trusted unconditionally here. In production this
+// server always sits behind CloudFront, which is the only source of this header.
+// Do not expose this server directly to the internet without a trusted proxy.
 func requestScheme(r *http.Request) string {
 	if r.TLS != nil {
 		return "https"
@@ -214,6 +220,11 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	if strings.Contains(clientRedirectURI, "?") {
 		sep = "&"
 	}
+	// TODO: the access token is passed as the `code` parameter in the redirect URL,
+	// which means it appears in server logs, Referer headers, and browser history.
+	// A production hardening step would exchange it for a short-lived opaque code
+	// here and have the client redeem that code for the bearer token out-of-band.
+	// For an MCP server with a small number of trusted clients this risk is accepted.
 	target := clientRedirectURI + sep + "code=" + accessToken
 	if payload.ClientState != "" {
 		target += "&state=" + url.QueryEscape(payload.ClientState)
@@ -221,8 +232,9 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, target, http.StatusFound)
 }
 
-// ValidateRedirectURI ensures the client redirect URI shares the same origin
-// as the server's configured redirect URL to prevent open-redirect attacks.
+// ValidateRedirectURI ensures the client redirect URI has the same scheme+host
+// as the server's configured redirect URL and shares its path prefix.
+// This prevents open-redirect attacks and path-traversal variants.
 func ValidateRedirectURI(configuredRedirectURL, clientRedirectURI string) error {
 	configured, err := url.Parse(configuredRedirectURL)
 	if err != nil {
@@ -232,8 +244,13 @@ func ValidateRedirectURI(configuredRedirectURL, clientRedirectURI string) error 
 	if err != nil {
 		return fmt.Errorf("invalid redirect_uri: %w", err)
 	}
-	if configured.Scheme != client.Scheme || configured.Host != client.Host {
-		return fmt.Errorf("redirect_uri origin %q not allowed", client.Host)
+	// Clean paths to neutralise traversal sequences before prefix comparison.
+	configuredPath := path.Clean(configured.Path)
+	clientPath := path.Clean(client.Path)
+	if configured.Scheme != client.Scheme ||
+		configured.Host != client.Host ||
+		!strings.HasPrefix(clientPath, configuredPath) {
+		return fmt.Errorf("redirect_uri %q not allowed", clientRedirectURI)
 	}
 	return nil
 }
@@ -264,6 +281,9 @@ func fetchGoogleUserInfo(ctx context.Context, client *http.Client) (*googleUserI
 }
 
 // upsertUser creates or updates the user record and applies the admin bootstrap rule.
+// Note: GetUser → SaveUser is not atomic. Two concurrent first-logins for the same
+// user could race, but SaveUser uses if_not_exists(CreatedAt) so CreatedAt is safe.
+// Status is set from the existing record, so concurrent logins are idempotent in practice.
 func (h *Handler) upsertUser(ctx context.Context, info *googleUserInfo, refreshToken string) error {
 	existing, err := h.db.GetUser(ctx, info.Sub)
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
