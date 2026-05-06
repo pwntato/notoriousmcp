@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -272,8 +273,11 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 }
 
 // ValidateRedirectURI ensures the client redirect URI exactly matches the
-// server's configured redirect URL (scheme, host, and path). RFC 6749 §3.1.2
-// requires exact matching. path.Clean neutralises traversal sequences first.
+// server's configured redirect URL (scheme, host, path, and no query string).
+// RFC 6749 §3.1.2 requires exact URI matching. path.Clean neutralises
+// traversal sequences. Query strings are rejected on the client URI because
+// they are not part of a valid callback URL and could be used to smuggle state
+// via an open redirector.
 func ValidateRedirectURI(configuredRedirectURL, clientRedirectURI string) error {
 	configured, err := url.Parse(configuredRedirectURL)
 	if err != nil {
@@ -282,6 +286,9 @@ func ValidateRedirectURI(configuredRedirectURL, clientRedirectURI string) error 
 	client, err := url.Parse(clientRedirectURI)
 	if err != nil {
 		return fmt.Errorf("invalid redirect_uri: %w", err)
+	}
+	if client.RawQuery != "" {
+		return fmt.Errorf("redirect_uri must not contain a query string")
 	}
 	if configured.Scheme != client.Scheme ||
 		configured.Host != client.Host ||
@@ -309,7 +316,9 @@ func fetchGoogleUserInfo(ctx context.Context, client *http.Client) (*googleUserI
 		return nil, fmt.Errorf("userinfo status %d", resp.StatusCode)
 	}
 	// Limit response size — Google's userinfo payload is tiny but defense-in-depth.
-	limited := http.MaxBytesReader(nil, resp.Body, 64*1024)
+	// io.LimitedReader is used rather than http.MaxBytesReader to avoid passing
+	// a nil ResponseWriter (undocumented behaviour).
+	limited := &io.LimitedReader{R: resp.Body, N: 64 * 1024}
 	var info googleUserInfo
 	if err := json.NewDecoder(limited).Decode(&info); err != nil {
 		return nil, fmt.Errorf("userinfo decode: %w", err)
@@ -369,6 +378,11 @@ func (h *Handler) upsertUser(ctx context.Context, info *googleUserInfo, refreshT
 
 	// Only update the refresh token if Google returned one (only on first
 	// authorization or when the user re-grants access).
+	// Note: if SaveUser succeeds but SaveRefreshToken fails, the user record exists
+	// but has no stored token. On the next login Google won't re-send the token
+	// (unless the user re-grants), leaving the server unable to refresh on their
+	// behalf. This is an accepted gap — a future improvement would be to use a
+	// DynamoDB transaction, or to surface the partial failure to the user.
 	if refreshToken != "" {
 		if err := h.db.SaveRefreshToken(ctx, info.Sub, refreshToken); err != nil {
 			return fmt.Errorf("save refresh token: %w", err)

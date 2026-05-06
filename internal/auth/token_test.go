@@ -91,8 +91,8 @@ func TestValidateRedirectURI(t *testing.T) {
 		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback/sub", true},
 		// Trailing slash normalised by path.Clean — treated as equivalent
 		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback/", false},
-		// Query string on client URI — path comparison ignores query, so allowed
-		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback?foo=bar", false},
+		// Query string on client URI — rejected (RFC 6749 requires exact match, no query)
+		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback?foo=bar", true},
 	}
 	for _, tc := range cases {
 		err := auth.ValidateRedirectURI(tc.configured, tc.client)
