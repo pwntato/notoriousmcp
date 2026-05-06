@@ -7,7 +7,7 @@ import (
 )
 
 func TestAccessTokenRoundTrip(t *testing.T) {
-	secret := []byte("test-secret-key")
+	secret := []byte("test-secret-key-at-least-32-bytes!!")
 	userID := "google-sub-123"
 
 	token, err := auth.IssueAccessToken(secret, userID)

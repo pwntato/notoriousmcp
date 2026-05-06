@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"path"
@@ -34,6 +35,18 @@ func New(cfg Config, dbClient *db.Client) *Handler {
 	if err := cfg.Validate(); err != nil {
 		panic("invalid auth config: " + err.Error())
 	}
+	// Log admin sub IDs at startup so promotions are observable in logs.
+	// Logged as count + first-8-chars of each ID for auditability without
+	// exposing full Google subject IDs.
+	adminHints := make([]string, len(cfg.AdminGoogleIDs))
+	for i, id := range cfg.AdminGoogleIDs {
+		if len(id) > 8 {
+			adminHints[i] = id[:8] + "..."
+		} else {
+			adminHints[i] = id
+		}
+	}
+	log.Printf("auth: %d admin ID(s) configured: %v", len(cfg.AdminGoogleIDs), adminHints)
 	return &Handler{
 		cfg: cfg,
 		db:  dbClient,
@@ -151,6 +164,16 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 // creates or updates the user record, and redirects back to the MCP client.
 func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	// Check for OAuth error response first (e.g. user denied access).
+	if oauthErr := r.URL.Query().Get("error"); oauthErr != "" {
+		desc := r.URL.Query().Get("error_description")
+		if desc == "" {
+			desc = oauthErr
+		}
+		http.Error(w, "authorization denied: "+desc, http.StatusBadRequest)
+		return
+	}
 
 	// Decode state payload.
 	stateEncoded := r.URL.Query().Get("state")

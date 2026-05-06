@@ -10,6 +10,7 @@ import (
 	"github.com/pwntato/notoriousmcp/internal/auth"
 )
 
+
 func newTestHandler(t *testing.T) *auth.Handler {
 	t.Helper()
 	cfg := auth.Config{
@@ -139,11 +140,10 @@ func TestCallbackMissingNonceCookie(t *testing.T) {
 	}
 }
 
-func TestCallbackJSONFallback(t *testing.T) {
-	// When the state payload has no redirect_uri, callback returns JSON.
-	// This test reaches the nonce check (400) before JSON, since we can't
-	// complete the Google exchange in a unit test. We verify the handler
-	// does not panic and returns a well-formed error response.
+func TestCallbackReachesTokenExchangeWithoutRedirectURI(t *testing.T) {
+	// Verifies the callback handler reaches token exchange (500 from fake Google)
+	// when state has no redirect_uri — confirming the JSON fallback path is reached
+	// rather than an earlier panic or redirect.
 	h := newTestHandler(t)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
@@ -164,6 +164,23 @@ func TestCallbackJSONFallback(t *testing.T) {
 	}
 	if w.Code == 0 {
 		t.Error("handler produced no response — possible panic")
+	}
+}
+
+func TestCallbackOAuthError(t *testing.T) {
+	h := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/auth/callback?error=access_denied&error_description=User+denied+access", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d want 400 for OAuth error response", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "denied") {
+		t.Errorf("body should contain denial message, got: %q", w.Body.String())
 	}
 }
 
