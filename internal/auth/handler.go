@@ -67,17 +67,17 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /auth/callback", h.callback)
 }
 
-// requestScheme returns https when the request arrived over TLS or via a
-// reverse proxy that set X-Forwarded-Proto. Falls back to http for local dev.
-// Note: X-Forwarded-Proto is trusted unconditionally here. In production this
-// server always sits behind CloudFront, which is the only source of this header.
-// Do not expose this server directly to the internet without a trusted proxy.
-func requestScheme(r *http.Request) string {
+// requestScheme returns https when TLS is active or, if trustProxy is true,
+// when X-Forwarded-Proto is "https". Only set trustProxy when the server is
+// behind a trusted reverse proxy (CloudFront/ALB) — never for direct-to-internet.
+func requestScheme(r *http.Request, trustProxy bool) string {
 	if r.TLS != nil {
 		return "https"
 	}
-	if proto := r.Header.Get("X-Forwarded-Proto"); proto == "https" {
-		return "https"
+	if trustProxy {
+		if proto := r.Header.Get("X-Forwarded-Proto"); proto == "https" {
+			return "https"
+		}
 	}
 	return "http"
 }
@@ -85,7 +85,7 @@ func requestScheme(r *http.Request) string {
 // wellKnown serves the OAuth 2.0 authorization server metadata required by the MCP spec.
 // token_endpoint is intentionally omitted until issue #4 implements it.
 func (h *Handler) wellKnown(w http.ResponseWriter, r *http.Request) {
-	base := requestScheme(r) + "://" + r.Host
+	base := requestScheme(r, h.cfg.TrustProxy) + "://" + r.Host
 	meta := map[string]any{
 		"issuer":                   base,
 		"authorization_endpoint":   base + "/auth/login",
@@ -142,7 +142,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	// the only security-critical value and it is validated separately via this cookie.
 	// PKCE (RFC 7636) is not enforced here. If public/native MCP clients are supported
 	// in future, add PKCE via oauth2.S256ChallengeOption before deploying to them.
-	secure := requestScheme(r) == "https"
+	secure := requestScheme(r, h.cfg.TrustProxy) == "https"
 	http.SetCookie(w, &http.Cookie{
 		Name:     "oauth_nonce",
 		Value:    nonce,
@@ -170,6 +170,10 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		desc := r.URL.Query().Get("error_description")
 		if desc == "" {
 			desc = oauthErr
+		}
+		// Truncate to avoid echoing arbitrarily large Google-sourced strings.
+		if len(desc) > 200 {
+			desc = desc[:200]
 		}
 		http.Error(w, "authorization denied: "+desc, http.StatusBadRequest)
 		return
@@ -256,11 +260,10 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	if strings.Contains(clientRedirectURI, "?") {
 		sep = "&"
 	}
-	// TODO: the access token is passed as the `code` parameter in the redirect URL,
+	// The access token is passed as the `code` parameter in the redirect URL,
 	// which means it appears in server logs, Referer headers, and browser history.
-	// A production hardening step would exchange it for a short-lived opaque code
-	// here and have the client redeem that code for the bearer token out-of-band.
-	// For an MCP server with a small number of trusted clients this risk is accepted.
+	// Tracked in issue #21: implement a short-lived opaque code exchange so the
+	// bearer token is never exposed in a URL.
 	target := clientRedirectURI + sep + "code=" + accessToken
 	if payload.ClientState != "" {
 		target += "&state=" + url.QueryEscape(payload.ClientState)

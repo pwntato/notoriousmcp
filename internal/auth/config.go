@@ -10,6 +10,8 @@ type Config struct {
 	RedirectURL    string   // e.g. https://notoriousmcp.com/auth/callback
 	AdminGoogleIDs []string // subject IDs that are always promoted to admin on login
 	TokenSecret    []byte   // HMAC-SHA256 secret for signing access tokens; min 32 bytes
+	TrustProxy     bool     // set true when running behind a trusted reverse proxy (CloudFront/ALB)
+	                        // that sets X-Forwarded-Proto; do not enable on direct-to-internet deployments
 }
 
 // Validate returns an error if any required field is missing or too short.

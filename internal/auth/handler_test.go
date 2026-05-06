@@ -10,7 +10,6 @@ import (
 	"github.com/pwntato/notoriousmcp/internal/auth"
 )
 
-
 func newTestHandler(t *testing.T) *auth.Handler {
 	t.Helper()
 	cfg := auth.Config{
@@ -18,8 +17,10 @@ func newTestHandler(t *testing.T) *auth.Handler {
 		ClientSecret: "test-client-secret",
 		RedirectURL:  "https://example.com/auth/callback",
 		TokenSecret:  []byte("test-secret-key-at-least-32-bytes!!"),
+		TrustProxy:   true,
 	}
-	// Handler requires a db.Client; pass nil — the handler tests don't hit DB paths.
+	// db.Client is nil — safe as long as tests don't exercise DB code paths.
+	// Tests that reach upsertUser or token validation against DB belong in #4.
 	return auth.New(cfg, nil)
 }
 
@@ -53,6 +54,26 @@ func TestWellKnown(t *testing.T) {
 	// token_endpoint should not be present until implemented.
 	if _, ok := meta["token_endpoint"]; ok {
 		t.Error("token_endpoint should not be advertised until implemented")
+	}
+}
+
+func TestWellKnownXForwardedProto(t *testing.T) {
+	h := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/.well-known/oauth-authorization-server", nil)
+	req.Host = "example.com"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	var meta map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&meta); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if meta["issuer"] != "https://example.com" {
+		t.Errorf("issuer with X-Forwarded-Proto: got %v want https://example.com", meta["issuer"])
 	}
 }
 

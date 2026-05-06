@@ -24,15 +24,15 @@ func TestAccessTokenRoundTrip(t *testing.T) {
 }
 
 func TestAccessTokenWrongSecret(t *testing.T) {
-	token, _ := auth.IssueAccessToken([]byte("secret-a"), "user-1")
-	_, err := auth.ValidateAccessToken([]byte("secret-b"), token)
+	token, _ := auth.IssueAccessToken([]byte("secret-aaaaaaaaaaaaaaaaaaaaaaaaaaaa"), "user-1")
+	_, err := auth.ValidateAccessToken([]byte("secret-bbbbbbbbbbbbbbbbbbbbbbbbbbbb"), token)
 	if err != auth.ErrInvalidToken {
 		t.Errorf("expected ErrInvalidToken, got %v", err)
 	}
 }
 
 func TestAccessTokenTampered(t *testing.T) {
-	secret := []byte("test-secret")
+	secret := []byte("test-secret-key-at-least-32-bytes!!")
 	token, _ := auth.IssueAccessToken(secret, "user-1")
 	tampered := token[:len(token)-4] + "XXXX"
 	_, err := auth.ValidateAccessToken(secret, tampered)
@@ -54,7 +54,7 @@ func TestAccessTokenExpired(t *testing.T) {
 }
 
 func TestAccessTokenMalformed(t *testing.T) {
-	secret := []byte("test-secret")
+	secret := []byte("test-secret-key-at-least-32-bytes!!")
 	cases := []string{
 		"",                 // empty
 		"nodot",            // no separator
@@ -89,6 +89,8 @@ func TestValidateRedirectURI(t *testing.T) {
 		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback-extra", true},
 		// Sub-paths also rejected — exact match only (RFC 6749 §3.1.2)
 		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback/sub", true},
+		// Trailing slash normalised by path.Clean — treated as equivalent
+		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback/", false},
 	}
 	for _, tc := range cases {
 		err := auth.ValidateRedirectURI(tc.configured, tc.client)
