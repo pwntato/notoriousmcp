@@ -27,7 +27,9 @@ type Handler struct {
 	oauthCfg *oauth2.Config
 }
 
-// New creates an auth Handler. cfg must pass Validate() before calling New.
+// New creates an auth Handler. Panics on invalid config — this is intentional:
+// misconfiguration is a programming error caught at process startup, not a
+// runtime condition. Call cfg.Validate() explicitly if you need an error return.
 func New(cfg Config, dbClient *db.Client) *Handler {
 	if err := cfg.Validate(); err != nil {
 		panic("invalid auth config: " + err.Error())
@@ -186,27 +188,27 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	// Exchange auth code for tokens.
 	oauthToken, err := h.oauthCfg.Exchange(ctx, code)
 	if err != nil {
-		http.Error(w, "token exchange failed", http.StatusInternalServerError)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	// Fetch Google user info.
 	info, err := fetchGoogleUserInfo(ctx, h.oauthCfg.Client(ctx, oauthToken))
 	if err != nil {
-		http.Error(w, "failed to fetch user info", http.StatusInternalServerError)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	// Upsert user and apply admin bootstrap rule.
 	if err := h.upsertUser(ctx, info, oauthToken.RefreshToken); err != nil {
-		http.Error(w, "failed to save user", http.StatusInternalServerError)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	// Issue our own short-lived access token.
 	accessToken, err := IssueAccessToken(h.cfg.TokenSecret, info.Sub)
 	if err != nil {
-		http.Error(w, "failed to issue token", http.StatusInternalServerError)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -243,9 +245,9 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, target, http.StatusFound)
 }
 
-// ValidateRedirectURI ensures the client redirect URI has the same scheme+host
-// as the server's configured redirect URL and shares its path prefix.
-// This prevents open-redirect attacks and path-traversal variants.
+// ValidateRedirectURI ensures the client redirect URI exactly matches the
+// server's configured redirect URL (scheme, host, and path). RFC 6749 §3.1.2
+// requires exact matching. path.Clean neutralises traversal sequences first.
 func ValidateRedirectURI(configuredRedirectURL, clientRedirectURI string) error {
 	configured, err := url.Parse(configuredRedirectURL)
 	if err != nil {
@@ -255,18 +257,15 @@ func ValidateRedirectURI(configuredRedirectURL, clientRedirectURI string) error 
 	if err != nil {
 		return fmt.Errorf("invalid redirect_uri: %w", err)
 	}
-	// Clean paths to neutralise traversal sequences before comparison.
-	// Require exact match or a sub-path (prefix + "/") to prevent
-	// /auth/callback-extra from matching /auth/callback.
-	configuredPath := path.Clean(configured.Path)
-	clientPath := path.Clean(client.Path)
-	sameOrigin := configured.Scheme == client.Scheme && configured.Host == client.Host
-	exactOrSub := clientPath == configuredPath || strings.HasPrefix(clientPath, configuredPath+"/")
-	if !sameOrigin || !exactOrSub {
+	if configured.Scheme != client.Scheme ||
+		configured.Host != client.Host ||
+		path.Clean(configured.Path) != path.Clean(client.Path) {
 		return fmt.Errorf("redirect_uri %q not allowed", clientRedirectURI)
 	}
 	return nil
 }
+
+const googleUserInfoURL = "https://openidconnect.googleapis.com/v1/userinfo"
 
 type googleUserInfo struct {
 	Sub   string `json:"sub"`
@@ -275,7 +274,7 @@ type googleUserInfo struct {
 }
 
 func fetchGoogleUserInfo(ctx context.Context, client *http.Client) (*googleUserInfo, error) {
-	resp, err := client.Get("https://openidconnect.googleapis.com/v1/userinfo")
+	resp, err := client.Get(googleUserInfoURL)
 	if err != nil {
 		return nil, fmt.Errorf("userinfo request: %w", err)
 	}
@@ -294,9 +293,12 @@ func fetchGoogleUserInfo(ctx context.Context, client *http.Client) (*googleUserI
 }
 
 // upsertUser creates or updates the user record and applies the admin bootstrap rule.
-// Note: GetUser → SaveUser is not atomic. Two concurrent first-logins for the same
-// user could race, but SaveUser uses if_not_exists(CreatedAt) so CreatedAt is safe.
-// Status is set from the existing record, so concurrent logins are idempotent in practice.
+// Note: GetUser → SaveUser is a non-atomic read-modify-write. Two concurrent
+// first-logins race safely because: (a) SaveUser uses if_not_exists(CreatedAt)
+// so CreatedAt is never overwritten, and (b) both concurrent reads return
+// ErrNotFound, both set status=pending, so both writes produce the same result.
+// A non-admin user whose status was already set won't be overwritten because the
+// changed check skips the write when status/email/name haven't changed.
 func (h *Handler) upsertUser(ctx context.Context, info *googleUserInfo, refreshToken string) error {
 	existing, err := h.db.GetUser(ctx, info.Sub)
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
