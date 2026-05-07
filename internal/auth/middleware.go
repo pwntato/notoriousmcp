@@ -155,8 +155,13 @@ func tryRefresh(ctx context.Context, secret []byte, dbClient *db.Client, rawToke
 
 // responseBuffer is a minimal http.ResponseWriter that captures the response
 // from a downstream handler so the middleware can inspect the status code before
-// flushing to the real writer. It implements http.Flusher as a no-op to prevent
-// panics if a downstream handler calls Flush() via interface assertion.
+// flushing to the real writer.
+//
+// Limitations: it implements http.Flusher as a no-op (streaming/SSE handlers
+// will receive the full body only after completion, not incrementally) and does
+// not implement http.Hijacker (WebSocket or HTTP/1.1 upgrade handlers will panic
+// on the interface assertion). Neither is a concern for this REST-only server, but
+// if either is added in future, the refresh path will need a different approach.
 type responseBuffer struct {
 	header http.Header
 	body   bytes.Buffer

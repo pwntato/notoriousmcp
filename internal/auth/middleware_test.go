@@ -53,7 +53,7 @@ func TestMiddlewareMissingToken(t *testing.T) {
 func TestMiddlewareInvalidToken(t *testing.T) {
 	h := auth.Middleware(testMiddlewareCfg(), nil, http.HandlerFunc(okHandler))
 
-	for _, bad := range []string{"garbage", "Bearer ", "Basic abc"} {
+	for _, bad := range []string{"garbage", "Bearer ", "Basic abc", "Bearer \t"} {
 		req := httptest.NewRequest("GET", "/", nil)
 		req.Header.Set("Authorization", bad)
 		w := httptest.NewRecorder()
