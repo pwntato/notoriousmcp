@@ -28,7 +28,8 @@ type Handler struct {
 	store *store.Client
 }
 
-// New creates an MCP Handler.
+// New creates an MCP Handler. Passing nil for dbClient or storeClient is safe
+// only for unit tests that exercise code paths not reaching the DB or store.
 func New(dbClient *db.Client, storeClient *store.Client) *Handler {
 	return &Handler{db: dbClient, store: storeClient}
 }
@@ -107,9 +108,10 @@ func (h *Handler) dispatch(r *http.Request, user *models.User, method string, pa
 	case "initialize":
 		return h.handleInitialize(params)
 	case "notifications/initialized":
-		// No-op: clients send this after initialize per the MCP spec.
-		// Return an empty object so the response is valid JSON-RPC.
-		return map[string]any{}, nil
+		// MCP spec: notifications are one-way; the server must not send a
+		// response. Returning nil result produces {"result":null} which most
+		// clients ignore, and is preferable to {} which implies a schema.
+		return nil, nil
 	case "tools/list":
 		return h.handleToolsList(user)
 	case "tools/call":

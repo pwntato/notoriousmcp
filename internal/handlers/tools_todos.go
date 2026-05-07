@@ -70,6 +70,8 @@ func (h *Handler) handleDeleteTodoList(ctx context.Context, user *models.User, a
 	if err != nil {
 		return nil, &rpcError{Code: codeInvalidParams, Message: err.Error()}
 	}
+	// DeleteTodoList is scoped by userID at the DB layer (PK = USER#userID),
+	// so no explicit ownership fetch is needed before deleting.
 	if err := h.db.DeleteTodoList(ctx, user.UserID, listID); err != nil {
 		return dbErrResult(err)
 	}
