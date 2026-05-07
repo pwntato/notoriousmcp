@@ -85,6 +85,8 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 	} else {
 		version := versionArg(args)
 		if version == 0 {
+			// version omitted: auto-increment bypasses optimistic concurrency.
+			// Callers that need conflict detection must pass the current version.
 			version = existing.Version + 1
 		}
 		f = &models.File{
@@ -125,12 +127,13 @@ func (h *Handler) handleDeleteFile(ctx context.Context, user *models.User, args 
 		return dbErrResult(err)
 	}
 
-	if err := h.store.DeleteContent(ctx, f.S3Key); err != nil {
-		return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
-	}
-
+	// DB-first: same rationale as handleDeleteNote.
 	if err := h.db.DeleteFile(ctx, user.UserID, filePath); err != nil {
 		return dbErrResult(err)
+	}
+
+	if err := h.store.DeleteContent(ctx, f.S3Key); err != nil {
+		return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
 	}
 
 	return textResult("file deleted")

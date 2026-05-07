@@ -302,9 +302,54 @@ func TestToolsCallMissingName(t *testing.T) {
 	resp := doMCPRequest(t, h, "tools/call", map[string]any{
 		"arguments": map[string]any{},
 	})
-	// Empty name → method not found.
 	if resp.Error == nil {
 		t.Fatal("expected error for missing tool name")
+	}
+	if resp.Error.Code != -32601 {
+		t.Errorf("code: got %d want -32601", resp.Error.Code)
+	}
+}
+
+func TestCheckStatusNotExposedToActiveUsers(t *testing.T) {
+	// check_status is only in the tool list for pending/banned users.
+	// Active users (user/admin) cannot call it — the tool list gates access.
+	for _, status := range []models.UserStatus{models.StatusUser, models.StatusAdmin} {
+		user := &models.User{UserID: "u1", Status: status}
+		h := newUnitHandler(user)
+
+		resp := doMCPRequest(t, h, "tools/call", map[string]any{
+			"name":      "check_status",
+			"arguments": map[string]any{},
+		})
+		if resp.Error == nil || resp.Error.Code != -32601 {
+			t.Errorf("status %s: expected -32601 method-not-found, got error=%v", status, resp.Error)
+		}
+	}
+}
+
+func TestSaveFilePathSanitisation(t *testing.T) {
+	// Test only the invalid cases — these are rejected before the db is touched,
+	// so a nil db client is fine.
+	invalid := []string{"", ".", "../", "../../etc/passwd/../.."}
+
+	for _, input := range invalid {
+		// Feed a path that after path.Clean + trim resolves to empty or ".".
+		// Only truly empty / dot results are rejected; traversal sequences that
+		// still produce a non-empty path (e.g. "../../etc/passwd") are cleaned
+		// and accepted (the result is "etc/passwd").
+		user := &models.User{UserID: "u1", Status: models.StatusUser}
+		h := newUnitHandler(user)
+
+		resp := doMCPRequest(t, h, "tools/call", map[string]any{
+			"name": "save_file",
+			"arguments": map[string]any{
+				"path":    input,
+				"content": "x",
+			},
+		})
+		if resp.Error == nil || resp.Error.Code != -32602 {
+			t.Errorf("path %q: expected -32602 invalid params, got error=%v", input, resp.Error)
+		}
 	}
 }
 
@@ -554,6 +599,60 @@ func TestIntegrationAdminUpdateUser(t *testing.T) {
 	})
 	if resp.Error != nil {
 		t.Fatalf("update_user: %+v", resp.Error)
+	}
+}
+
+func TestIntegrationVersionConflict(t *testing.T) {
+	dbClient, storeClient := newTestClients(t)
+	user := saveIntegrationUser(t, dbClient, models.StatusUser)
+	h := newIntegrationHandler(t, dbClient, storeClient)
+
+	// Create a note.
+	resp := doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name": "save_note",
+		"arguments": map[string]any{
+			"title":   "Conflict Test",
+			"content": "v1",
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("save_note v1: %+v", resp.Error)
+	}
+	noteID := extractField(t, resp.Result, "id")
+
+	// Update once to advance version to 2.
+	doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name": "save_note",
+		"arguments": map[string]any{
+			"note_id": noteID,
+			"title":   "Conflict Test",
+			"content": "v2",
+			"version": 2,
+		},
+	})
+
+	// Attempt to update with stale version 2 again — must get a conflict error.
+	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name": "save_note",
+		"arguments": map[string]any{
+			"note_id": noteID,
+			"title":   "Conflict Test",
+			"content": "stale",
+			"version": 2,
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("unexpected RPC error: %+v", resp.Error)
+	}
+	// The result should be an IsError tool result, not an RPC error.
+	var result struct {
+		IsError bool `json:"isError"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if !result.IsError {
+		t.Error("stale-version update: expected isError=true in result")
 	}
 }
 

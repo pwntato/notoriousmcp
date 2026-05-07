@@ -6,9 +6,7 @@ func handleCheckStatus(user *models.User) (*toolsCallResult, *rpcError) {
 	switch user.Status {
 	case models.StatusPending:
 		return textResult("Your account is pending admin approval.")
-	case models.StatusBanned:
+	default: // banned
 		return textResult("Your account has been banned.")
-	default:
-		return textResult("Your account is active.")
 	}
 }

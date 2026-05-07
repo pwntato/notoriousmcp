@@ -44,6 +44,8 @@ func (h *Handler) handleSaveTodoList(ctx context.Context, user *models.User, arg
 		}
 		version := versionArg(args)
 		if version == 0 {
+			// version omitted: auto-increment bypasses optimistic concurrency.
+			// Callers that need conflict detection must pass the current version.
 			version = existing.Version + 1
 		}
 		list = &models.TodoList{
@@ -144,6 +146,8 @@ func (h *Handler) handleSaveTodo(ctx context.Context, user *models.User, args ma
 		}
 		version := versionArg(args)
 		if version == 0 {
+			// version omitted: auto-increment bypasses optimistic concurrency.
+			// Callers that need conflict detection must pass the current version.
 			version = existing.Version + 1
 		}
 		todo = &models.Todo{

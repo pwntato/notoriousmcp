@@ -75,6 +75,8 @@ func (h *Handler) handleSaveNote(ctx context.Context, user *models.User, args ma
 		}
 		version := versionArg(args)
 		if version == 0 {
+			// version omitted: auto-increment bypasses optimistic concurrency.
+			// Callers that need conflict detection must pass the current version.
 			version = existing.Version + 1
 		}
 		note = &models.Note{
@@ -117,12 +119,16 @@ func (h *Handler) handleDeleteNote(ctx context.Context, user *models.User, args 
 		return dbErrResult(err)
 	}
 
-	if err := h.store.DeleteContent(ctx, note.S3Key); err != nil {
-		return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
-	}
-
+	// DB-first: if the S3 delete later fails, the DB record is already gone so
+	// subsequent reads return not-found rather than a dangling pointer. The
+	// orphaned S3 object is recoverable; a dangling DB reference is harder to
+	// detect and correct.
 	if err := h.db.DeleteNote(ctx, user.UserID, noteID); err != nil {
 		return dbErrResult(err)
+	}
+
+	if err := h.store.DeleteContent(ctx, note.S3Key); err != nil {
+		return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
 	}
 
 	return textResult("note deleted")
