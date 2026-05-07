@@ -411,6 +411,36 @@ func TestSaveFilePathSanitisation(t *testing.T) {
 	}
 }
 
+func TestCleanFilePath(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string // empty string means expect an error
+	}{
+		{"notes/foo.md", "notes/foo.md"},
+		{"../../etc/passwd", "etc/passwd"},   // traversal collapses, namespace stays under userID prefix
+		{"/absolute/path", "absolute/path"}, // leading slash stripped
+		{`back\slash`, "back/slash"},        // backslash normalized
+		{"a//b", "a/b"},                     // double slash collapsed
+		{"", ""},                            // empty → rejected
+		{".", ""},                           // dot → rejected
+		{"../", ""},                         // traversal-only → rejected
+	}
+	for _, tc := range cases {
+		got, err := handlers.CleanFilePath(tc.input)
+		if tc.want == "" {
+			if err == nil {
+				t.Errorf("cleanFilePath(%q): expected error, got %q", tc.input, got)
+			}
+		} else {
+			if err != nil {
+				t.Errorf("cleanFilePath(%q): unexpected error: %v", tc.input, err)
+			} else if got != tc.want {
+				t.Errorf("cleanFilePath(%q): got %q want %q", tc.input, got, tc.want)
+			}
+		}
+	}
+}
+
 // ---- integration tests (require DYNAMODB_ENDPOINT + S3_ENDPOINT) ----
 
 func newTestClients(t *testing.T) (*db.Client, *store.Client) {

@@ -140,6 +140,9 @@ func (h *Handler) handleDeleteNote(ctx context.Context, user *models.User, args 
 		return dbErrResult(err)
 	}
 
+	// Returning an error here even though the DB record is gone is intentional:
+	// the S3 failure is real and the client should know. A retry will hit
+	// ErrNotFound on the DB read and return "not found" gracefully.
 	if err := h.store.DeleteContent(ctx, note.S3Key); err != nil {
 		log.Printf("mcp: delete note %s: s3 delete %s: %v", noteID, note.S3Key, err)
 		return nil, &rpcError{Code: codeInternalError, Message: "internal error"}

@@ -154,6 +154,8 @@ func (h *Handler) handleDeleteFile(ctx context.Context, user *models.User, args 
 		return dbErrResult(err)
 	}
 
+	// Same rationale as handleDeleteNote: surface the S3 error; a retry hits
+	// ErrNotFound on the DB read and returns gracefully.
 	if err := h.store.DeleteContent(ctx, f.S3Key); err != nil {
 		log.Printf("mcp: delete file %s: s3 delete %s: %v", filePath, f.S3Key, err)
 		return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
