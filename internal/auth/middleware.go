@@ -25,6 +25,12 @@ func UserFromContext(ctx context.Context) *models.User {
 	return u
 }
 
+// WithUserContext returns a copy of ctx with user injected as the authenticated
+// user. Intended for tests that bypass Middleware.
+func WithUserContext(ctx context.Context, user *models.User) context.Context {
+	return context.WithValue(ctx, userContextKey, user)
+}
+
 // Middleware wraps an http.Handler, enforcing token authentication on every
 // request. It validates the Bearer token, loads the user's current status from
 // DynamoDB (never trusting embedded token claims for authorization), and injects

@@ -25,7 +25,7 @@ type Note struct {
 	UserID     string    `json:"user_id"     dynamodbav:"UserID"`
 	Title      string    `json:"title"       dynamodbav:"Title"`
 	Tags       []string  `json:"tags"        dynamodbav:"Tags"`
-	S3Key      string    `json:"s3_key"      dynamodbav:"S3Key"`
+	S3Key      string    `json:"-"           dynamodbav:"S3Key"`
 	Version    int       `json:"version"     dynamodbav:"Version"`
 	CreatedAt  time.Time `json:"created_at"  dynamodbav:"CreatedAt"`
 	ModifiedAt time.Time `json:"modified_at" dynamodbav:"ModifiedAt"`
@@ -66,7 +66,7 @@ type Todo struct {
 type File struct {
 	Path       string    `json:"path"        dynamodbav:"Path"`
 	UserID     string    `json:"user_id"     dynamodbav:"UserID"`
-	S3Key      string    `json:"s3_key"      dynamodbav:"S3Key"`
+	S3Key      string    `json:"-"           dynamodbav:"S3Key"`
 	Size       int64     `json:"size"        dynamodbav:"Size"`
 	Version    int       `json:"version"     dynamodbav:"Version"`
 	CreatedAt  time.Time `json:"created_at"  dynamodbav:"CreatedAt"`
