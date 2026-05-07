@@ -77,6 +77,9 @@ func envOrDefault(key, def string) string {
 	return def
 }
 
+// filterEmpty removes empty strings. Needed because strings.Split("", ",") returns
+// [""] rather than [], so an unset ADMIN_GOOGLE_IDS env var must be cleaned before
+// passing to auth.Config.
 func filterEmpty(ss []string) []string {
 	var out []string
 	for _, s := range ss {

@@ -620,8 +620,8 @@ func TestIntegrationVersionConflict(t *testing.T) {
 	}
 	noteID := extractField(t, resp.Result, "id")
 
-	// Update once to advance version to 2.
-	doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+	// Update once to advance version to 2 — assert it succeeds.
+	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
 		"name": "save_note",
 		"arguments": map[string]any{
 			"note_id": noteID,
@@ -630,6 +630,18 @@ func TestIntegrationVersionConflict(t *testing.T) {
 			"version": 2,
 		},
 	})
+	if resp.Error != nil {
+		t.Fatalf("save_note v2: %+v", resp.Error)
+	}
+	var v2result struct {
+		IsError bool `json:"isError"`
+	}
+	if err := json.Unmarshal(resp.Result, &v2result); err != nil {
+		t.Fatalf("unmarshal v2 result: %v", err)
+	}
+	if v2result.IsError {
+		t.Fatal("save_note v2 should succeed but got isError=true")
+	}
 
 	// Attempt to update with stale version 2 again — must get a conflict error.
 	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{

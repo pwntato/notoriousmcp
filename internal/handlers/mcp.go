@@ -67,7 +67,12 @@ const (
 	codeInternalError  = -32603
 )
 
+// maxRequestBytes caps the MCP request body to slightly above the 1MB content
+// limit so a single large tool call is accepted while unbounded payloads are not.
+const maxRequestBytes = 2 << 20 // 2MB
+
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
 	var req rpcRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, nil, codeParseError, "parse error")
@@ -146,7 +151,7 @@ type toolsListResult struct {
 }
 
 func (h *Handler) handleToolsList(user *models.User) (any, *rpcError) {
-	return toolsListResult{Tools: toolsForUser(user)}, nil
+	return toolsListResult{Tools: toolDefsFor(h.toolsForUser(user))}, nil
 }
 
 // tools/call
@@ -175,19 +180,13 @@ func (h *Handler) handleToolsCall(r *http.Request, user *models.User, params jso
 		p.Arguments = map[string]any{}
 	}
 
-	allowed := toolsForUser(user)
-	found := false
+	allowed := h.toolsForUser(user)
 	for _, t := range allowed {
-		if t.Name == p.Name {
-			found = true
-			break
+		if t.def.Name == p.Name {
+			return t.fn(r.Context(), user, p.Arguments)
 		}
 	}
-	if !found {
-		return nil, &rpcError{Code: codeMethodNotFound, Message: fmt.Sprintf("unknown tool: %s", p.Name)}
-	}
-
-	return h.callTool(r.Context(), user, p.Name, p.Arguments)
+	return nil, &rpcError{Code: codeMethodNotFound, Message: fmt.Sprintf("unknown tool: %s", p.Name)}
 }
 
 // textResult wraps plain text output in an MCP content block.

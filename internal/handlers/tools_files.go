@@ -22,8 +22,24 @@ func (h *Handler) handleListFiles(ctx context.Context, user *models.User, args m
 	return jsonResult(files)
 }
 
+// cleanFilePath normalises a user-supplied file path: converts backslashes,
+// applies path.Clean to remove traversal sequences, and strips the leading
+// slash. Returns an error for paths that resolve to empty or ".".
+func cleanFilePath(raw string) (string, error) {
+	p := path.Clean("/" + strings.ReplaceAll(raw, `\`, "/"))
+	p = strings.TrimPrefix(p, "/")
+	if p == "" || p == "." {
+		return "", fmt.Errorf("invalid path")
+	}
+	return p, nil
+}
+
 func (h *Handler) handleGetFile(ctx context.Context, user *models.User, args map[string]any) (*toolsCallResult, *rpcError) {
-	filePath, err := strArg(args, "path")
+	raw, err := strArg(args, "path")
+	if err != nil {
+		return nil, &rpcError{Code: codeInvalidParams, Message: err.Error()}
+	}
+	filePath, err := cleanFilePath(raw)
 	if err != nil {
 		return nil, &rpcError{Code: codeInvalidParams, Message: err.Error()}
 	}
@@ -49,13 +65,9 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 	if err != nil {
 		return nil, &rpcError{Code: codeInvalidParams, Message: err.Error()}
 	}
-	// Normalise the path to remove traversal sequences (e.g. "../../foo").
-	// DynamoDB enforces data isolation via PK=USER#<id>, so a crafted path
-	// cannot read another user's data, but cleaning prevents unexpected S3 keys.
-	filePath := path.Clean("/" + strings.ReplaceAll(rawPath, `\`, "/"))
-	filePath = strings.TrimPrefix(filePath, "/")
-	if filePath == "" || filePath == "." {
-		return nil, &rpcError{Code: codeInvalidParams, Message: "invalid path"}
+	filePath, err := cleanFilePath(rawPath)
+	if err != nil {
+		return nil, &rpcError{Code: codeInvalidParams, Message: err.Error()}
 	}
 
 	content, err := strArg(args, "content")
@@ -117,7 +129,11 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 }
 
 func (h *Handler) handleDeleteFile(ctx context.Context, user *models.User, args map[string]any) (*toolsCallResult, *rpcError) {
-	filePath, err := strArg(args, "path")
+	raw, err := strArg(args, "path")
+	if err != nil {
+		return nil, &rpcError{Code: codeInvalidParams, Message: err.Error()}
+	}
+	filePath, err := cleanFilePath(raw)
 	if err != nil {
 		return nil, &rpcError{Code: codeInvalidParams, Message: err.Error()}
 	}

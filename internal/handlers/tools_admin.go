@@ -13,6 +13,11 @@ func (h *Handler) handleListUsers(ctx context.Context, args map[string]any) (*to
 	var statusFilter *models.UserStatus
 	if statusStr != "" {
 		s := models.UserStatus(statusStr)
+		switch s {
+		case models.StatusPending, models.StatusUser, models.StatusAdmin, models.StatusBanned:
+		default:
+			return nil, &rpcError{Code: codeInvalidParams, Message: "invalid status value"}
+		}
 		statusFilter = &s
 	}
 	users, err := h.db.ListUsers(ctx, statusFilter)
