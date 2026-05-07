@@ -93,8 +93,10 @@ func Middleware(cfg Config, dbClient *db.Client, next http.Handler) http.Handler
 		for k, vs := range buf.header {
 			w.Header()[k] = vs
 		}
+		if buf.status == 0 {
+			buf.status = http.StatusOK
+		}
 		if buf.status >= 200 && buf.status < 300 {
-			log.Printf("middleware: issued refresh token for user %s", userID)
 			w.Header().Set("X-New-Token", newToken)
 		}
 		w.WriteHeader(buf.status)
