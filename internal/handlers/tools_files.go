@@ -90,7 +90,8 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 		f = &models.File{
 			Path:       filePath,
 			UserID:     user.UserID,
-			// Same stable-key-on-create trade-off as handleSaveNote.
+			// Same stable-key-on-create trade-off as handleSaveNote; DB enforces
+			// attribute_not_exists on Version==1 writes.
 			S3Key:      fmt.Sprintf("files/%s/%s/%s", user.UserID, filePath, newID()),
 			Size:       int64(len(content)),
 			Version:    1,

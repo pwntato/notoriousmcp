@@ -66,11 +66,13 @@ func (h *Handler) handleSaveNote(ctx context.Context, user *models.User, args ma
 			UserID:     user.UserID,
 			Title:      title,
 			Tags:       tags,
-			// Create path uses a stable key; updates use a fresh key per write.
-		// A failure between the S3 write and the first DB update (v1→v2)
-		// would overwrite this object, but that window is small and the
-		// orphan-on-conflict strategy applies from the second write onward.
-		S3Key:      fmt.Sprintf("notes/%s/%s", user.UserID, noteID),
+				// Create path uses a stable key; updates use a fresh key per write.
+			// A failure between the S3 write and the first DB update (v1→v2)
+			// would overwrite this object, but that window is small and the
+			// orphan-on-conflict strategy applies from the second write onward.
+			// The DB enforces attribute_not_exists on Version==1 writes, so two
+			// concurrent creates for the same ID safely conflict at the DB layer.
+			S3Key:      fmt.Sprintf("notes/%s/%s", user.UserID, noteID),
 			Version:    1,
 			CreatedAt:  now,
 			ModifiedAt: now,

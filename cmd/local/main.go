@@ -59,6 +59,10 @@ func main() {
 
 // publicRouter routes auth and well-known paths directly to mux (bypassing
 // middleware), and all other paths through the auth-protected handler.
+// auth.RegisterRoutes only registers /auth/login and /auth/callback (with
+// trailing path components), so the /auth/ prefix check is correct — bare
+// /auth with no trailing slash falls through to the protected handler and
+// correctly returns 404.
 func publicRouter(public, protected http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/auth/") ||
