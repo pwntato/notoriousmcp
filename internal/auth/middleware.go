@@ -86,7 +86,7 @@ func Middleware(cfg Config, dbClient *db.Client, next http.Handler) http.Handler
 		// deciding whether to include X-New-Token. The header must not appear on
 		// non-2xx responses from next (e.g. 404, 500) — a client that treats its
 		// presence as "refresh succeeded" would be misled.
-		buf := &responseBuffer{header: w.Header().Clone()}
+		buf := &responseBuffer{header: make(http.Header)}
 		next.ServeHTTP(buf, r.WithContext(context.WithValue(ctx, userContextKey, user)))
 		// Copy buffered headers first (direct slice assignment preserves multi-value
 		// headers), then write X-New-Token so next cannot accidentally overwrite it.
@@ -103,15 +103,12 @@ func Middleware(cfg Config, dbClient *db.Client, next http.Handler) http.Handler
 }
 
 // resolveToken validates the bearer token and returns the userID. If the token
-// is invalid but has a valid HMAC signature (i.e. expired rather than forged),
-// it attempts a refresh using the stored Google refresh token and returns a new
-// notoriousmcp access token as the second return value. Returns an error if the
-// token cannot be accepted or refreshed.
-//
-// ValidateAccessToken returns ErrInvalidToken for both structurally-bad and
-// expired tokens — there is no separate ErrExpiredToken sentinel. The refresh
-// path is attempted optimistically; validSignatureUserID re-verifies the HMAC
-// first, so forged tokens are rejected before the DB is touched.
+// fails validation with ErrInvalidToken (covers both expired and structurally-bad
+// tokens — there is no separate ErrExpiredToken sentinel), the refresh path is
+// attempted optimistically; validSignatureUserID re-verifies the HMAC first so
+// forged tokens are rejected before the DB is touched. Non-ErrInvalidToken errors
+// (e.g. an internal crypto failure) are propagated directly without attempting
+// a refresh.
 func resolveToken(ctx context.Context, secret []byte, dbClient *db.Client, token string) (userID, newToken string, err error) {
 	userID, err = ValidateAccessToken(secret, token)
 	if err == nil {
@@ -137,7 +134,8 @@ func bearerToken(r *http.Request) string {
 // tryRefresh issues a new notoriousmcp access token for the user embedded in
 // rawToken, provided the token's HMAC signature is valid (expiry is not checked).
 // The stored Google refresh token's presence in DynamoDB is used as proof of
-// prior authorization without calling Google's token endpoint.
+// prior authorization without calling Google's token endpoint. A future PR should
+// exchange the stored token with Google to detect revocation — tracked in issue #5.
 func tryRefresh(ctx context.Context, secret []byte, dbClient *db.Client, rawToken string) (newToken, userID string, err error) {
 	userID, err = validSignatureUserID(secret, rawToken)
 	if err != nil {
@@ -157,7 +155,8 @@ func tryRefresh(ctx context.Context, secret []byte, dbClient *db.Client, rawToke
 
 // responseBuffer is a minimal http.ResponseWriter that captures the response
 // from a downstream handler so the middleware can inspect the status code before
-// flushing to the real writer.
+// flushing to the real writer. It implements http.Flusher as a no-op to prevent
+// panics if a downstream handler calls Flush() via interface assertion.
 type responseBuffer struct {
 	header http.Header
 	body   bytes.Buffer
@@ -178,6 +177,8 @@ func (rb *responseBuffer) Write(b []byte) (int, error) {
 	}
 	return rb.body.Write(b)
 }
+
+func (rb *responseBuffer) Flush() {}
 
 // validSignatureUserID parses a token and returns the userID if and only if the
 // HMAC signature is correct — expiry is intentionally not checked. This is used
