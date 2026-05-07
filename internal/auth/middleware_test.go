@@ -193,6 +193,9 @@ func TestMiddlewareValidToken(t *testing.T) {
 	if got := w.Header().Get("X-User-ID"); got != userID {
 		t.Errorf("X-User-ID: got %q want %q", got, userID)
 	}
+	if got := w.Header().Get("X-New-Token"); got != "" {
+		t.Errorf("X-New-Token should be absent on non-refresh request, got %q", got)
+	}
 }
 
 func TestMiddlewareAdminUser(t *testing.T) {
@@ -368,5 +371,34 @@ func TestMiddlewareExpiredTokenNoRefreshToken(t *testing.T) {
 
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("expired, no refresh token: got %d want 401", w.Code)
+	}
+}
+
+func TestMiddlewareExpiredTokenRefreshBannedUser(t *testing.T) {
+	// A banned user whose token is expired but has a stored refresh token must
+	// get 403, not a new token — X-New-Token must not be present on the response.
+	dbClient := newTestDBClient(t)
+	userID := randUID()
+	saveTestUser(t, dbClient, userID, models.StatusBanned)
+	if err := dbClient.SaveRefreshToken(context.Background(), userID, "google-refresh-token"); err != nil {
+		t.Fatalf("save refresh token: %v", err)
+	}
+
+	expired, err := auth.IssueExpiredToken(testSecret, userID)
+	if err != nil {
+		t.Fatalf("issue expired: %v", err)
+	}
+
+	h := auth.Middleware(testMiddlewareCfg(), dbClient, http.HandlerFunc(okHandler))
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Authorization", "Bearer "+expired)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("banned+expired+refresh: got %d want 403", w.Code)
+	}
+	if got := w.Header().Get("X-New-Token"); got != "" {
+		t.Errorf("X-New-Token must not be set on 403 response, got %q", got)
 	}
 }
