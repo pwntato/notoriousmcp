@@ -310,6 +310,35 @@ func TestToolsCallMissingName(t *testing.T) {
 	}
 }
 
+func TestNotificationsInitializedNoOp(t *testing.T) {
+	user := &models.User{UserID: "u1", Status: models.StatusUser}
+	h := newUnitHandler(user)
+
+	resp := doMCPRequest(t, h, "notifications/initialized", nil)
+	if resp.Error != nil {
+		t.Fatalf("notifications/initialized: expected no error, got %+v", resp.Error)
+	}
+}
+
+func TestListTodosInvalidStatus(t *testing.T) {
+	user := &models.User{UserID: "u1", Status: models.StatusUser}
+	h := newUnitHandler(user)
+
+	resp := doMCPRequest(t, h, "tools/call", map[string]any{
+		"name": "list_todos",
+		"arguments": map[string]any{
+			"list_id": "some-list",
+			"status":  "not_a_real_status",
+		},
+	})
+	if resp.Error == nil {
+		t.Fatal("expected error for invalid todo status")
+	}
+	if resp.Error.Code != -32602 {
+		t.Errorf("code: got %d want -32602 (invalid params)", resp.Error.Code)
+	}
+}
+
 func TestCheckStatusNotExposedToActiveUsers(t *testing.T) {
 	// check_status is only in the tool list for pending/banned users.
 	// Active users (user/admin) cannot call it — the tool list gates access.

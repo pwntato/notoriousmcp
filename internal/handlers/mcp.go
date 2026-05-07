@@ -106,6 +106,10 @@ func (h *Handler) dispatch(r *http.Request, user *models.User, method string, pa
 	switch method {
 	case "initialize":
 		return h.handleInitialize(params)
+	case "notifications/initialized":
+		// No-op: clients send this after initialize per the MCP spec.
+		// Return an empty object so the response is valid JSON-RPC.
+		return map[string]any{}, nil
 	case "tools/list":
 		return h.handleToolsList(user)
 	case "tools/call":

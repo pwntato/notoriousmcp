@@ -51,7 +51,7 @@ func (h *Handler) toolsForUser(user *models.User) []registeredTool {
 		return append(h.userTools(), h.adminTools()...)
 	default:
 		// pending or banned — check_status only
-		return []registeredTool{h.statusTools()[0]}
+		return h.checkStatusTool()
 	}
 }
 
@@ -63,10 +63,10 @@ func toolDefsFor(tools []registeredTool) []toolDef {
 	}
 	return defs
 }
-
-
-// statusTools returns the tool list for pending/banned users.
-func (h *Handler) statusTools() []registeredTool {
+// checkStatusTool returns the single-element slice containing the check_status
+// tool — the only tool exposed to pending/banned users. A dedicated helper
+// avoids indexing into a slice by position.
+func (h *Handler) checkStatusTool() []registeredTool {
 	return []registeredTool{
 		{
 			def: toolDef{

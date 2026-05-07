@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log"
 
 	"github.com/pwntato/notoriousmcp/internal/db"
 	"github.com/pwntato/notoriousmcp/internal/models"
@@ -50,6 +51,7 @@ func (h *Handler) handleUpdateUser(ctx context.Context, args map[string]any) (*t
 		}
 		return dbErrResult(err)
 	}
+	log.Printf("admin: user %s status set to %s", userID, status)
 	return textResult("user updated")
 }
 

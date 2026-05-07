@@ -87,6 +87,11 @@ func (h *Handler) handleListTodos(ctx context.Context, user *models.User, args m
 	var statusFilter *models.TodoStatus
 	if statusStr != "" {
 		s := models.TodoStatus(statusStr)
+		switch s {
+		case models.TodoPending, models.TodoInProgress, models.TodoDone:
+		default:
+			return nil, &rpcError{Code: codeInvalidParams, Message: "invalid status value"}
+		}
 		statusFilter = &s
 	}
 
