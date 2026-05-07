@@ -352,6 +352,40 @@ func TestMiddlewareExpiredTokenRefreshSuccess(t *testing.T) {
 	}
 }
 
+func TestMiddlewareXNewTokenAbsentOnNextError(t *testing.T) {
+	// X-New-Token must not appear when next returns a non-2xx status, even when
+	// token refresh succeeded. Otherwise a client that treats its presence as
+	// "session renewed" would be misled by an upstream 404 or 500.
+	dbClient := newTestDBClient(t)
+	userID := randUID()
+	saveTestUser(t, dbClient, userID, models.StatusUser)
+	if err := dbClient.SaveRefreshToken(context.Background(), userID, "google-refresh-token"); err != nil {
+		t.Fatalf("save refresh token: %v", err)
+	}
+
+	expired, err := auth.IssueExpiredToken(testSecret, userID)
+	if err != nil {
+		t.Fatalf("issue expired: %v", err)
+	}
+
+	errorHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	})
+
+	h := auth.Middleware(testMiddlewareCfg(), dbClient, errorHandler)
+	req := httptest.NewRequest("GET", "/missing", nil)
+	req.Header.Set("Authorization", "Bearer "+expired)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status: got %d want 404", w.Code)
+	}
+	if got := w.Header().Get("X-New-Token"); got != "" {
+		t.Errorf("X-New-Token must be absent when next returns non-2xx, got %q", got)
+	}
+}
+
 func TestMiddlewareExpiredTokenNoRefreshToken(t *testing.T) {
 	dbClient := newTestDBClient(t)
 	userID := randUID()

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"encoding/base64"
@@ -31,8 +32,9 @@ func UserFromContext(ctx context.Context) *models.User {
 //
 // If the token is expired and the user has a stored Google refresh token,
 // a fresh notoriousmcp access token is issued and delivered via X-New-Token.
-// X-New-Token is only written when the request succeeds (2xx forwarded to next);
-// a 401 or 403 response never carries a new token.
+// X-New-Token is only written when next responds with a 2xx status code —
+// the response is buffered to enforce this. A 401, 403, or 5xx from next
+// will not carry the header.
 //
 // Note: the stored Google refresh token is not exchanged with Google on every
 // request — its presence in DynamoDB is treated as proof of prior authorization.
@@ -74,12 +76,29 @@ func Middleware(cfg Config, dbClient *db.Client, next http.Handler) http.Handler
 			return
 		}
 
-		// Only deliver a new token to requests that are going to succeed.
-		if newToken != "" {
-			w.Header().Set("X-New-Token", newToken)
+		if newToken == "" {
+			// Common path: no refresh needed, write directly to the real ResponseWriter.
+			next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, userContextKey, user)))
+			return
 		}
 
-		next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, userContextKey, user)))
+		// Refresh path: buffer the response so we can inspect the status code before
+		// deciding whether to include X-New-Token. The header must not appear on
+		// non-2xx responses from next (e.g. 404, 500) — a client that treats its
+		// presence as "refresh succeeded" would be misled.
+		buf := &responseBuffer{header: w.Header().Clone()}
+		next.ServeHTTP(buf, r.WithContext(context.WithValue(ctx, userContextKey, user)))
+		if buf.status >= 200 && buf.status < 300 {
+			w.Header().Set("X-New-Token", newToken)
+		}
+		// Copy buffered headers (set by next) then flush status + body.
+		for k, vs := range buf.header {
+			for _, v := range vs {
+				w.Header().Set(k, v)
+			}
+		}
+		w.WriteHeader(buf.status)
+		_, _ = w.Write(buf.body.Bytes())
 	})
 }
 
@@ -134,6 +153,30 @@ func tryRefresh(ctx context.Context, secret []byte, dbClient *db.Client, rawToke
 		return "", "", err
 	}
 	return newToken, userID, nil
+}
+
+// responseBuffer is a minimal http.ResponseWriter that captures the response
+// from a downstream handler so the middleware can inspect the status code before
+// flushing to the real writer.
+type responseBuffer struct {
+	header http.Header
+	body   bytes.Buffer
+	status int
+}
+
+func (rb *responseBuffer) Header() http.Header { return rb.header }
+
+func (rb *responseBuffer) WriteHeader(code int) {
+	if rb.status == 0 {
+		rb.status = code
+	}
+}
+
+func (rb *responseBuffer) Write(b []byte) (int, error) {
+	if rb.status == 0 {
+		rb.status = http.StatusOK
+	}
+	return rb.body.Write(b)
 }
 
 // validSignatureUserID parses a token and returns the userID if and only if the
