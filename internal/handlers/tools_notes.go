@@ -11,7 +11,10 @@ import (
 )
 
 func (h *Handler) handleSearchNotes(ctx context.Context, user *models.User, args map[string]any) (*toolsCallResult, *rpcError) {
-	modifiedSince := strArgOpt(args, "modified_since")
+	modifiedSince, rpcErr := parseModifiedSince(strArgOpt(args, "modified_since"))
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
 	notes, err := h.db.ListNotes(ctx, user.UserID, modifiedSince)
 	if err != nil {
 		return dbErrResult(err)
@@ -84,16 +87,19 @@ func (h *Handler) handleSaveNote(ctx context.Context, user *models.User, args ma
 			UserID:     user.UserID,
 			Title:      title,
 			Tags:       tags,
-			S3Key:      existing.S3Key,
+			// Fresh S3 key per write: if the DB write fails (version conflict),
+			// the new S3 object is orphaned but the DB record still points to the
+			// previous key, so prior content is never overwritten.
+			S3Key:      fmt.Sprintf("notes/%s/%s/%s", user.UserID, noteID, newID()),
 			Version:    version,
 			CreatedAt:  existing.CreatedAt,
 			ModifiedAt: now,
 		}
 	}
 
-	// S3 write precedes DynamoDB write; if the DB write fails (e.g. version
-	// conflict) the S3 object becomes orphaned. Acceptable at current scale —
-	// tracked for future cleanup via a lifecycle policy or explicit rollback.
+	// S3 write precedes DynamoDB write; on DB conflict the new S3 object is
+	// orphaned but the previous version's object is untouched (version-stamped
+	// keys ensure writes never overwrite earlier content).
 	if err := h.store.PutContent(ctx, note.S3Key, content); err != nil {
 		if errors.Is(err, store.ErrTooLarge) {
 			return errorResult("content exceeds 1MB limit")

@@ -279,6 +279,20 @@ func parseOptionalTime(s string) (*time.Time, error) {
 	return &t, nil
 }
 
+// parseModifiedSince validates and normalises a user-supplied modified_since
+// string. Returns a normalised RFC3339 string suitable for DB key comparisons,
+// or an rpcError if the value is non-empty but unparseable.
+func parseModifiedSince(s string) (string, *rpcError) {
+	if s == "" {
+		return "", nil
+	}
+	t, err := parseOptionalTime(s)
+	if err != nil {
+		return "", &rpcError{Code: codeInvalidParams, Message: err.Error()}
+	}
+	return t.UTC().Format(time.RFC3339), nil
+}
+
 // newID generates a random 16-byte hex ID.
 func newID() string {
 	b := make([]byte, 16)

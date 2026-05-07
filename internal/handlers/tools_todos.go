@@ -81,7 +81,10 @@ func (h *Handler) handleListTodos(ctx context.Context, user *models.User, args m
 	if err != nil {
 		return nil, &rpcError{Code: codeInvalidParams, Message: err.Error()}
 	}
-	modifiedSince := strArgOpt(args, "modified_since")
+	modifiedSince, rpcErr := parseModifiedSince(strArgOpt(args, "modified_since"))
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
 	statusStr := strArgOpt(args, "status")
 
 	var statusFilter *models.TodoStatus

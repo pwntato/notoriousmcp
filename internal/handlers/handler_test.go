@@ -695,6 +695,18 @@ func TestIntegrationVersionConflict(t *testing.T) {
 	if !result.IsError {
 		t.Error("stale-version update: expected isError=true in result")
 	}
+
+	// Confirm the stale write was truly rejected: content must still be "v2".
+	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name":      "get_note",
+		"arguments": map[string]any{"note_id": noteID},
+	})
+	if resp.Error != nil {
+		t.Fatalf("get_note after stale write: %+v", resp.Error)
+	}
+	if content := extractField(t, resp.Result, "content"); content != "v2" {
+		t.Errorf("note content after stale write: got %q want \"v2\"", content)
+	}
 }
 
 func TestIntegrationUserCannotCallAdminTool(t *testing.T) {

@@ -14,7 +14,10 @@ import (
 )
 
 func (h *Handler) handleListFiles(ctx context.Context, user *models.User, args map[string]any) (*toolsCallResult, *rpcError) {
-	modifiedSince := strArgOpt(args, "modified_since")
+	modifiedSince, rpcErr := parseModifiedSince(strArgOpt(args, "modified_since"))
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
 	files, err := h.db.ListFiles(ctx, user.UserID, modifiedSince)
 	if err != nil {
 		return dbErrResult(err)
@@ -76,7 +79,6 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 	}
 
 	now := time.Now().UTC()
-	s3Key := fmt.Sprintf("files/%s/%s", user.UserID, filePath)
 	var f *models.File
 
 	existing, dbErr := h.db.GetFile(ctx, user.UserID, filePath)
@@ -88,7 +90,7 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 		f = &models.File{
 			Path:       filePath,
 			UserID:     user.UserID,
-			S3Key:      s3Key,
+			S3Key:      fmt.Sprintf("files/%s/%s/%s", user.UserID, filePath, newID()),
 			Size:       int64(len(content)),
 			Version:    1,
 			CreatedAt:  now,
@@ -104,7 +106,8 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 		f = &models.File{
 			Path:       filePath,
 			UserID:     user.UserID,
-			S3Key:      existing.S3Key,
+			// Fresh S3 key per write: same rationale as handleSaveNote.
+			S3Key:      fmt.Sprintf("files/%s/%s/%s", user.UserID, filePath, newID()),
 			Size:       int64(len(content)),
 			Version:    version,
 			CreatedAt:  existing.CreatedAt,
@@ -112,8 +115,8 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 		}
 	}
 
-	// S3 write precedes DynamoDB write; if the DB write fails (e.g. version
-	// conflict) the S3 object becomes orphaned. Same trade-off as handleSaveNote.
+	// S3 write precedes DynamoDB write; on DB conflict the new S3 object is
+	// orphaned but the previous version's object is untouched.
 	if err := h.store.PutContent(ctx, f.S3Key, content); err != nil {
 		if errors.Is(err, store.ErrTooLarge) {
 			return errorResult("content exceeds 1MB limit")
