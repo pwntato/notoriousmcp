@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/pwntato/notoriousmcp/internal/models"
@@ -140,6 +141,7 @@ func (h *Handler) handleDeleteNote(ctx context.Context, user *models.User, args 
 	}
 
 	if err := h.store.DeleteContent(ctx, note.S3Key); err != nil {
+		log.Printf("mcp: delete note %s: s3 delete %s: %v", noteID, note.S3Key, err)
 		return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
 	}
 

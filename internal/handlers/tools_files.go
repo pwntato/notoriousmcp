@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"path"
 	"strings"
 	"time"
@@ -154,6 +155,7 @@ func (h *Handler) handleDeleteFile(ctx context.Context, user *models.User, args 
 	}
 
 	if err := h.store.DeleteContent(ctx, f.S3Key); err != nil {
+		log.Printf("mcp: delete file %s: s3 delete %s: %v", filePath, f.S3Key, err)
 		return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
 	}
 

@@ -143,8 +143,11 @@ func (h *Handler) handleSaveTodo(ctx context.Context, user *models.User, args ma
 	if todoID == "" {
 		todoID = newID()
 		todo = &models.Todo{
-			ID:         todoID,
-			ListID:     listID,
+			ID:     todoID,
+			ListID: listID,
+			// UserID is always the authenticated caller — DynamoDB uses PK=USER#<userID>
+			// so this write can only land under the caller's partition, making
+			// cross-user writes impossible at the DB layer regardless of list_id.
 			UserID:     user.UserID,
 			Text:       text,
 			Status:     status,
