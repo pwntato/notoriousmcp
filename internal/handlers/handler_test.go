@@ -310,6 +310,26 @@ func TestToolsCallMissingName(t *testing.T) {
 	}
 }
 
+func TestSaveTodoInvalidStatus(t *testing.T) {
+	user := &models.User{UserID: "u1", Status: models.StatusUser}
+	h := newUnitHandler(user)
+
+	resp := doMCPRequest(t, h, "tools/call", map[string]any{
+		"name": "save_todo",
+		"arguments": map[string]any{
+			"list_id": "some-list",
+			"text":    "buy milk",
+			"status":  "not_a_real_status",
+		},
+	})
+	if resp.Error == nil {
+		t.Fatal("expected error for invalid todo status in save_todo")
+	}
+	if resp.Error.Code != -32602 {
+		t.Errorf("code: got %d want -32602 (invalid params)", resp.Error.Code)
+	}
+}
+
 func TestNotificationsInitializedNoOp(t *testing.T) {
 	user := &models.User{UserID: "u1", Status: models.StatusUser}
 	h := newUnitHandler(user)
@@ -362,10 +382,10 @@ func TestSaveFilePathSanitisation(t *testing.T) {
 	invalid := []string{"", ".", "../", "../../etc/passwd/../.."}
 
 	for _, input := range invalid {
-		// Feed a path that after path.Clean + trim resolves to empty or ".".
-		// Only truly empty / dot results are rejected; traversal sequences that
-		// still produce a non-empty path (e.g. "../../etc/passwd") are cleaned
-		// and accepted (the result is "etc/passwd").
+		// These inputs resolve to empty or "." after path.Clean and are rejected.
+		// Inputs like "../../etc/passwd" are NOT rejected — they collapse to
+		// "etc/passwd" and are accepted, but remain safely scoped under the
+		// user's files/<userID>/ S3 prefix which is the actual namespace boundary.
 		user := &models.User{UserID: "u1", Status: models.StatusUser}
 		h := newUnitHandler(user)
 

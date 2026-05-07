@@ -63,6 +63,7 @@ func toolDefsFor(tools []registeredTool) []toolDef {
 	}
 	return defs
 }
+
 // checkStatusTool returns the single-element slice containing the check_status
 // tool — the only tool exposed to pending/banned users. A dedicated helper
 // avoids indexing into a slice by position.

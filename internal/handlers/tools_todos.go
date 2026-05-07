@@ -128,6 +128,11 @@ func (h *Handler) handleSaveTodo(ctx context.Context, user *models.User, args ma
 	status := models.TodoPending
 	if statusStr != "" {
 		status = models.TodoStatus(statusStr)
+		switch status {
+		case models.TodoPending, models.TodoInProgress, models.TodoDone:
+		default:
+			return nil, &rpcError{Code: codeInvalidParams, Message: "invalid status value"}
+		}
 	}
 
 	now := time.Now().UTC()
