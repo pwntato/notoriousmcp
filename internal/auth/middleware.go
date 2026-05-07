@@ -88,14 +88,14 @@ func Middleware(cfg Config, dbClient *db.Client, next http.Handler) http.Handler
 		// presence as "refresh succeeded" would be misled.
 		buf := &responseBuffer{header: w.Header().Clone()}
 		next.ServeHTTP(buf, r.WithContext(context.WithValue(ctx, userContextKey, user)))
-		if buf.status >= 200 && buf.status < 300 {
-			w.Header().Set("X-New-Token", newToken)
-		}
-		// Copy buffered headers (set by next) then flush status + body.
+		// Copy buffered headers first (direct slice assignment preserves multi-value
+		// headers), then write X-New-Token so next cannot accidentally overwrite it.
 		for k, vs := range buf.header {
-			for _, v := range vs {
-				w.Header().Set(k, v)
-			}
+			w.Header()[k] = vs
+		}
+		if buf.status >= 200 && buf.status < 300 {
+			log.Printf("middleware: issued refresh token for user %s", userID)
+			w.Header().Set("X-New-Token", newToken)
 		}
 		w.WriteHeader(buf.status)
 		_, _ = w.Write(buf.body.Bytes())
