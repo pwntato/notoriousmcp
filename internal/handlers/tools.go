@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"log"
 
 	"github.com/pwntato/notoriousmcp/internal/models"
 )
@@ -65,19 +64,6 @@ func toolDefsFor(tools []registeredTool) []toolDef {
 	return defs
 }
 
-// callTool finds the named tool in allowed and calls it. The allowed list must
-// already have been checked for access control before calling this function —
-// the lookup here is a second-pass dispatch on the same slice, not a new gate.
-func callTool(ctx context.Context, user *models.User, name string, allowed []registeredTool, args map[string]any) (*toolsCallResult, *rpcError) {
-	for _, t := range allowed {
-		if t.def.Name == name {
-			return t.fn(ctx, user, args)
-		}
-	}
-	// Unreachable: handleToolsCall already verified name is in allowed.
-	log.Printf("mcp: callTool: %q not found in allowed list (should not happen)", name)
-	return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
-}
 
 // statusTools returns the tool list for pending/banned users.
 func (h *Handler) statusTools() []registeredTool {
