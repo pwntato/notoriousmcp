@@ -471,14 +471,20 @@ func TestIntegrationTodoRoundTrip(t *testing.T) {
 		t.Fatalf("list_todos: %+v", resp.Error)
 	}
 
-	doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
 		"name":      "delete_todo",
 		"arguments": map[string]any{"list_id": listID, "todo_id": todoID},
 	})
-	doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+	if resp.Error != nil {
+		t.Fatalf("delete_todo: %+v", resp.Error)
+	}
+	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
 		"name":      "delete_todo_list",
 		"arguments": map[string]any{"list_id": listID},
 	})
+	if resp.Error != nil {
+		t.Fatalf("delete_todo_list: %+v", resp.Error)
+	}
 }
 
 func TestIntegrationFileRoundTrip(t *testing.T) {
@@ -548,6 +554,23 @@ func TestIntegrationAdminUpdateUser(t *testing.T) {
 	})
 	if resp.Error != nil {
 		t.Fatalf("update_user: %+v", resp.Error)
+	}
+}
+
+func TestIntegrationUserCannotCallAdminTool(t *testing.T) {
+	dbClient, storeClient := newTestClients(t)
+	user := saveIntegrationUser(t, dbClient, models.StatusUser)
+	h := newIntegrationHandler(t, dbClient, storeClient)
+
+	resp := doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name":      "list_users",
+		"arguments": map[string]any{},
+	})
+	if resp.Error == nil {
+		t.Fatal("user role must not be able to call list_users")
+	}
+	if resp.Error.Code != -32601 {
+		t.Errorf("code: got %d want -32601", resp.Error.Code)
 	}
 }
 

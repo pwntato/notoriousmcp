@@ -285,6 +285,21 @@ func newID() string {
 	return hex.EncodeToString(b)
 }
 
+// versionArg reads the optional "version" argument as int.
+func versionArg(args map[string]any) int {
+	v, ok := args["version"]
+	if !ok {
+		return 0
+	}
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	}
+	return 0
+}
+
 // dbErrResult translates common db errors to user-facing error results.
 func dbErrResult(err error) (*toolsCallResult, *rpcError) {
 	if errors.Is(err, db.ErrNotFound) {

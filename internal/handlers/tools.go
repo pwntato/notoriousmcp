@@ -241,7 +241,7 @@ var (
 	}
 )
 
-// userTools are the 13 tools available to all active users.
+// userTools are the 14 tools available to all active users.
 var userTools = []toolDef{
 	toolSearchNotes,
 	toolGetNote,

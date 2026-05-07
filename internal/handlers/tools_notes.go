@@ -89,6 +89,9 @@ func (h *Handler) handleSaveNote(ctx context.Context, user *models.User, args ma
 		}
 	}
 
+	// S3 write precedes DynamoDB write; if the DB write fails (e.g. version
+	// conflict) the S3 object becomes orphaned. Acceptable at current scale —
+	// tracked for future cleanup via a lifecycle policy or explicit rollback.
 	if err := h.store.PutContent(ctx, note.S3Key, content); err != nil {
 		if errors.Is(err, store.ErrTooLarge) {
 			return errorResult("content exceeds 1MB limit")
@@ -125,17 +128,3 @@ func (h *Handler) handleDeleteNote(ctx context.Context, user *models.User, args 
 	return textResult("note deleted")
 }
 
-// versionArg reads the optional "version" argument as int.
-func versionArg(args map[string]any) int {
-	v, ok := args["version"]
-	if !ok {
-		return 0
-	}
-	switch n := v.(type) {
-	case float64:
-		return int(n)
-	case int:
-		return n
-	}
-	return 0
-}

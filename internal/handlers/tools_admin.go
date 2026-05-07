@@ -48,7 +48,3 @@ func (h *Handler) handleUpdateUser(ctx context.Context, args map[string]any) (*t
 	return textResult("user updated")
 }
 
-// isNotFound returns true when err is db.ErrNotFound.
-func isNotFound(err error) bool {
-	return errors.Is(err, db.ErrNotFound)
-}
