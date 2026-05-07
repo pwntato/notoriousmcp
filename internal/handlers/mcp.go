@@ -90,6 +90,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// MCP notifications have no id field (or id: null). Per spec the server
+	// must not send a response for notifications — return 204 silently.
+	if isNotification(req.ID) {
+		h.dispatch(r, user, req.Method, req.Params) //nolint:errcheck // intentionally ignored
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	result, rpcErr := h.dispatch(r, user, req.Method, req.Params)
 	if rpcErr != nil {
 		writeError(w, req.ID, rpcErr.Code, rpcErr.Message)
@@ -103,15 +111,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// isNotification returns true when id is absent or null — the JSON-RPC 2.0
+// signal that a message is a one-way notification requiring no response.
+func isNotification(id json.RawMessage) bool {
+	return len(id) == 0 || string(id) == "null"
+}
+
 func (h *Handler) dispatch(r *http.Request, user *models.User, method string, params json.RawMessage) (any, *rpcError) {
 	switch method {
 	case "initialize":
 		return h.handleInitialize(params)
-	case "notifications/initialized":
-		// MCP spec: notifications are one-way; the server must not send a
-		// response. Returning nil result produces {"result":null} which most
-		// clients ignore, and is preferable to {} which implies a schema.
-		return nil, nil
 	case "tools/list":
 		return h.handleToolsList(user)
 	case "tools/call":

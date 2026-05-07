@@ -331,12 +331,21 @@ func TestSaveTodoInvalidStatus(t *testing.T) {
 }
 
 func TestNotificationsInitializedNoOp(t *testing.T) {
+	// notifications/initialized has no id (it's a one-way notification per MCP
+	// spec). The server must not send a response body — expect 204 No Content.
 	user := &models.User{UserID: "u1", Status: models.StatusUser}
 	h := newUnitHandler(user)
 
-	resp := doMCPRequest(t, h, "notifications/initialized", nil)
-	if resp.Error != nil {
-		t.Fatalf("notifications/initialized: expected no error, got %+v", resp.Error)
+	body := `{"jsonrpc":"2.0","method":"notifications/initialized"}`
+	req := httptest.NewRequest("POST", "/mcp", bytes.NewBufferString(body))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("notifications/initialized: got %d want 204", w.Code)
+	}
+	if w.Body.Len() != 0 {
+		t.Errorf("notifications/initialized: expected empty body, got %q", w.Body.String())
 	}
 }
 

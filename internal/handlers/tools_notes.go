@@ -62,15 +62,15 @@ func (h *Handler) handleSaveNote(ctx context.Context, user *models.User, args ma
 	if noteID == "" {
 		noteID = newID()
 		note = &models.Note{
-			ID:         noteID,
-			UserID:     user.UserID,
-			Title:      title,
-			Tags:       tags,
-				// Create path uses a stable key; updates use a fresh key per write.
+			ID:     noteID,
+			UserID: user.UserID,
+			Title:  title,
+			Tags:   tags,
+			// Create path uses a stable key; updates use a fresh key per write.
 			// A failure between the S3 write and the first DB update (v1→v2)
 			// would overwrite this object, but that window is small and the
 			// orphan-on-conflict strategy applies from the second write onward.
-			// The DB enforces attribute_not_exists on Version==1 writes, so two
+			// The DB enforces attribute_not_exists on Version==1 writes, so
 			// concurrent creates for the same ID safely conflict at the DB layer.
 			S3Key:      fmt.Sprintf("notes/%s/%s", user.UserID, noteID),
 			Version:    1,
@@ -89,10 +89,10 @@ func (h *Handler) handleSaveNote(ctx context.Context, user *models.User, args ma
 			version = existing.Version + 1
 		}
 		note = &models.Note{
-			ID:         noteID,
-			UserID:     user.UserID,
-			Title:      title,
-			Tags:       tags,
+			ID:     noteID,
+			UserID: user.UserID,
+			Title:  title,
+			Tags:   tags,
 			// Fresh S3 key per write: if the DB write fails (version conflict),
 			// the new S3 object is orphaned but the DB record still points to the
 			// previous key, so prior content is never overwritten.
@@ -145,4 +145,3 @@ func (h *Handler) handleDeleteNote(ctx context.Context, user *models.User, args 
 
 	return textResult("note deleted")
 }
-

@@ -27,20 +27,20 @@ type todoListRecord struct {
 }
 
 type todoRecord struct {
-	PK         string             `dynamodbav:"PK"`
-	SK         string             `dynamodbav:"SK"`
-	GSI1PK     string             `dynamodbav:"GSI1PK"`
-	GSI1SK     string             `dynamodbav:"GSI1SK"`
-	ID         string             `dynamodbav:"ID"`
-	ListID     string             `dynamodbav:"ListID"`
-	UserID     string             `dynamodbav:"UserID"`
-	Text       string             `dynamodbav:"Text"`
-	Status     models.TodoStatus  `dynamodbav:"Status"`
-	DueDate    string             `dynamodbav:"DueDate,omitempty"`
-	Tags       []string           `dynamodbav:"Tags"`
-	Version    int                `dynamodbav:"Version"`
-	CreatedAt  string             `dynamodbav:"CreatedAt"`
-	ModifiedAt string             `dynamodbav:"ModifiedAt"`
+	PK         string            `dynamodbav:"PK"`
+	SK         string            `dynamodbav:"SK"`
+	GSI1PK     string            `dynamodbav:"GSI1PK"`
+	GSI1SK     string            `dynamodbav:"GSI1SK"`
+	ID         string            `dynamodbav:"ID"`
+	ListID     string            `dynamodbav:"ListID"`
+	UserID     string            `dynamodbav:"UserID"`
+	Text       string            `dynamodbav:"Text"`
+	Status     models.TodoStatus `dynamodbav:"Status"`
+	DueDate    string            `dynamodbav:"DueDate,omitempty"`
+	Tags       []string          `dynamodbav:"Tags"`
+	Version    int               `dynamodbav:"Version"`
+	CreatedAt  string            `dynamodbav:"CreatedAt"`
+	ModifiedAt string            `dynamodbav:"ModifiedAt"`
 }
 
 // GetTodoList retrieves a todo list by ID.

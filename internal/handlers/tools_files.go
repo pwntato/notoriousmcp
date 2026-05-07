@@ -88,12 +88,12 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 
 	if existing == nil {
 		f = &models.File{
-			Path:       filePath,
-			UserID:     user.UserID,
+			Path:   filePath,
+			UserID: user.UserID,
 			// Same stable-key-on-create trade-off as handleSaveNote; DB enforces
 			// attribute_not_exists on Version==1 writes.
 			S3Key:      fmt.Sprintf("files/%s/%s/%s", user.UserID, filePath, newID()),
-			Size:       int64(len(content)),
+			Size:       int64(len([]byte(content))),
 			Version:    1,
 			CreatedAt:  now,
 			ModifiedAt: now,
@@ -106,11 +106,11 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 			version = existing.Version + 1
 		}
 		f = &models.File{
-			Path:       filePath,
-			UserID:     user.UserID,
+			Path:   filePath,
+			UserID: user.UserID,
 			// Fresh S3 key per write: same rationale as handleSaveNote.
 			S3Key:      fmt.Sprintf("files/%s/%s/%s", user.UserID, filePath, newID()),
-			Size:       int64(len(content)),
+			Size:       int64(len([]byte(content))),
 			Version:    version,
 			CreatedAt:  existing.CreatedAt,
 			ModifiedAt: now,

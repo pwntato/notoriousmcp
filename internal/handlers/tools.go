@@ -354,9 +354,8 @@ func (h *Handler) adminTools() []registeredTool {
 				},
 			},
 			fn: func(ctx context.Context, user *models.User, args map[string]any) (*toolsCallResult, *rpcError) {
-				return h.handleUpdateUser(ctx, args)
+				return h.handleUpdateUser(ctx, user, args)
 			},
 		},
 	}
 }
-

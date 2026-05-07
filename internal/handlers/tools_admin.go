@@ -28,7 +28,7 @@ func (h *Handler) handleListUsers(ctx context.Context, args map[string]any) (*to
 	return jsonResult(users)
 }
 
-func (h *Handler) handleUpdateUser(ctx context.Context, args map[string]any) (*toolsCallResult, *rpcError) {
+func (h *Handler) handleUpdateUser(ctx context.Context, caller *models.User, args map[string]any) (*toolsCallResult, *rpcError) {
 	userID, err := strArg(args, "user_id")
 	if err != nil {
 		return nil, &rpcError{Code: codeInvalidParams, Message: err.Error()}
@@ -45,6 +45,10 @@ func (h *Handler) handleUpdateUser(ctx context.Context, args map[string]any) (*t
 		return nil, &rpcError{Code: codeInvalidParams, Message: "invalid status value"}
 	}
 
+	if userID == caller.UserID && status != models.StatusAdmin {
+		return errorResult("admins cannot change their own status")
+	}
+
 	if err := h.db.UpdateUserStatus(ctx, userID, status); err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			return errorResult("user not found")
@@ -54,4 +58,3 @@ func (h *Handler) handleUpdateUser(ctx context.Context, args map[string]any) (*t
 	log.Printf("admin: user %s status set to %s", userID, status)
 	return textResult("user updated")
 }
-
