@@ -21,3 +21,6 @@ func IssueExpiredToken(secret []byte, userID string) (string, error) {
 	encoded := base64.RawURLEncoding.EncodeToString(payload)
 	return encoded + "." + sign(secret, encoded), nil
 }
+
+// ValidSignatureUserID exposes validSignatureUserID for testing.
+var ValidSignatureUserID = validSignatureUserID
