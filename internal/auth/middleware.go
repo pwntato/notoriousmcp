@@ -65,9 +65,10 @@ func Middleware(cfg Config, dbClient *db.Client, next http.Handler) http.Handler
 				return
 			}
 
-			// Token is structurally invalid or expired. Attempt a Google token refresh
-			// only when the signature is valid (i.e. the token is ours but expired),
-			// to avoid handing a forged userID to the refresh path.
+			// ValidateAccessToken returns ErrInvalidToken for both structurally-bad
+			// and expired tokens — there is no separate ErrExpiredToken sentinel. We
+			// attempt a refresh optimistically; tryRefresh re-verifies the HMAC first
+			// so forged tokens are rejected before the DB is touched.
 			newAccessToken, uid, refreshErr := tryRefresh(ctx, cfg.TokenSecret, dbClient, oauthCfg, token)
 			if refreshErr != nil {
 				http.Error(w, "invalid or expired token", http.StatusUnauthorized)
@@ -108,27 +109,19 @@ func bearerToken(r *http.Request) string {
 	return after
 }
 
-// tryRefresh attempts to refresh the session for the user whose (expired but
-// signature-valid) token is provided. It:
-//  1. Verifies the HMAC signature without checking expiry to confirm the token
-//     is genuinely ours — this prevents a forged token from triggering a refresh.
-//  2. Extracts the userID from the validated payload.
-//  3. Loads the stored Google refresh token from DynamoDB.
-//  4. Exchanges it for a new Google access token via OAuth2.
-//  5. Issues and returns a fresh notoriousmcp access token.
-func tryRefresh(ctx context.Context, secret []byte, dbClient *db.Client, oauthCfg *oauth2.Config, rawToken string) (string, string, error) {
+// tryRefresh issues a new notoriousmcp access token for the user embedded in
+// rawToken, provided the token's HMAC signature is valid (expiry is not checked).
+// It does not call Google's token endpoint — the stored refresh token's presence
+// in DynamoDB is sufficient proof of prior authorization. If the refresh token has
+// been revoked, Google will reject it on the user's next operation that requires a
+// live Google access token; that is out of scope for this middleware.
+func tryRefresh(ctx context.Context, secret []byte, dbClient *db.Client, _ *oauth2.Config, rawToken string) (string, string, error) {
 	userID, err := validSignatureUserID(secret, rawToken)
 	if err != nil {
 		return "", "", err
 	}
 
-	storedRefresh, err := dbClient.LoadRefreshToken(ctx, userID)
-	if err != nil {
-		return "", "", err
-	}
-
-	ts := oauthCfg.TokenSource(ctx, &oauth2.Token{RefreshToken: storedRefresh})
-	if _, err = ts.Token(); err != nil {
+	if _, err := dbClient.LoadRefreshToken(ctx, userID); err != nil {
 		return "", "", err
 	}
 

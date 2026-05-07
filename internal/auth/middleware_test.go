@@ -307,6 +307,48 @@ func TestMiddlewareDBLoadsCurrentStatus(t *testing.T) {
 	}
 }
 
+func TestMiddlewareExpiredTokenRefreshSuccess(t *testing.T) {
+	dbClient := newTestDBClient(t)
+	userID := randUID()
+	saveTestUser(t, dbClient, userID, models.StatusUser)
+	if err := dbClient.SaveRefreshToken(context.Background(), userID, "google-refresh-token"); err != nil {
+		t.Fatalf("save refresh token: %v", err)
+	}
+
+	expired, err := auth.IssueExpiredToken(testSecret, userID)
+	if err != nil {
+		t.Fatalf("issue expired: %v", err)
+	}
+
+	h := auth.Middleware(testMiddlewareCfg(), dbClient, http.HandlerFunc(okHandler))
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Authorization", "Bearer "+expired)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expired + refresh token: got %d want 200", w.Code)
+	}
+	newToken := w.Header().Get("X-New-Token")
+	if newToken == "" {
+		t.Error("X-New-Token header not set")
+	}
+	if newToken == expired {
+		t.Error("X-New-Token should be a new token, not the expired one")
+	}
+	// The new token must be valid and identify the same user.
+	gotUserID, err := auth.ValidateAccessToken(testSecret, newToken)
+	if err != nil {
+		t.Errorf("X-New-Token failed validation: %v", err)
+	}
+	if gotUserID != userID {
+		t.Errorf("X-New-Token userID: got %q want %q", gotUserID, userID)
+	}
+	if got := w.Header().Get("X-User-ID"); got != userID {
+		t.Errorf("user in context: got %q want %q", got, userID)
+	}
+}
+
 func TestMiddlewareExpiredTokenNoRefreshToken(t *testing.T) {
 	dbClient := newTestDBClient(t)
 	userID := randUID()
