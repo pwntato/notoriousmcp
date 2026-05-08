@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
@@ -23,7 +27,8 @@ import (
 var handler http.Handler
 
 func init() {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	awsCfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
@@ -79,7 +84,11 @@ func init() {
 func lambdaHandler(ctx context.Context, req events.LambdaFunctionURLRequest) (events.LambdaFunctionURLResponse, error) {
 	httpReq, err := toHTTPRequest(ctx, req)
 	if err != nil {
-		return events.LambdaFunctionURLResponse{StatusCode: 400}, nil
+		return events.LambdaFunctionURLResponse{
+			StatusCode: 400,
+			Headers:    map[string]string{"Content-Type": "application/json"},
+			Body:       `{"error":"bad request"}`,
+		}, nil
 	}
 
 	rec := httptest.NewRecorder()
@@ -108,8 +117,18 @@ func toHTTPRequest(ctx context.Context, req events.LambdaFunctionURLRequest) (*h
 		url += "?" + req.RawQueryString
 	}
 
-	body := strings.NewReader(req.Body)
-	httpReq, err := http.NewRequestWithContext(ctx, req.RequestContext.HTTP.Method, url, body)
+	var bodyReader io.Reader
+	if req.IsBase64Encoded {
+		decoded, err := base64.StdEncoding.DecodeString(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		bodyReader = bytes.NewReader(decoded)
+	} else {
+		bodyReader = strings.NewReader(req.Body)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, req.RequestContext.HTTP.Method, url, bodyReader)
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +138,9 @@ func toHTTPRequest(ctx context.Context, req events.LambdaFunctionURLRequest) (*h
 	return httpReq, nil
 }
 
+// publicRouter bypasses auth middleware for /auth/ and /.well-known/ paths.
+// Both public and protected wrap the same underlying mux; the distinction is
+// that protected passes requests through auth.Middleware first.
 func publicRouter(public, protected http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/auth/") ||
