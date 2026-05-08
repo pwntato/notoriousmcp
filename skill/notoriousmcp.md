@@ -4,11 +4,15 @@ NotoriousMCP is a self-hosted MCP server for notes, todo lists, files, and LLM m
 
 ## Installation
 
-```bash
-cp skill/notoriousmcp.md .claude/skills/notoriousmcp.md
+Add to `.claude/settings.json` (or the global `~/.claude/settings.json`):
+
+```json
+{
+  "skills": ["path/to/notoriousmcp/skill/notoriousmcp.md"]
+}
 ```
 
-Or add to Claude Code settings under `skills`.
+Or copy it to wherever your project's skill files live and reference that path.
 
 ## Auth
 
@@ -67,8 +71,10 @@ delete_note(note_id)
 ```
 list_todo_lists()                                       → []TodoList
 save_todo_list(title, list_id?, tags?, version?)        → TodoList
-delete_todo_list(list_id)                               # does not cascade-delete todos
+delete_todo_list(list_id)
 ```
+
+- `delete_todo_list` does not cascade-delete todos. Orphaned todos remain in DynamoDB and are still reachable via `list_todos(list_id=<deleted_id>)`. Delete the todos first via `delete_todo` if you want a clean removal.
 
 ### Todos (user+)
 
@@ -104,6 +110,7 @@ update_user(user_id, status)
 ```
 
 - `status` enum for users: `pending` | `user` | `admin` | `banned`
+- `user_id` is the Google subject ID (`sub`) — an opaque numeric string returned in the `user_id` field of `list_users` output.
 - Admins cannot change their own status away from `admin`.
 
 ### Status (pending/banned)
