@@ -14,6 +14,8 @@
 #   GOOGLE_CLIENT_ID      — from Google Cloud Console
 #   GOOGLE_CLIENT_SECRET  — from Google Cloud Console
 #   ADMIN_GOOGLE_IDS      — comma-separated Google subject IDs
+#   TOKEN_SECRET          — min 32-byte random string for HMAC signing (e.g. openssl rand -base64 32)
+#   REDIRECT_URL          — full OAuth callback URL (e.g. https://YOUR_CF_DOMAIN/auth/callback)
 #
 # Note: No AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY needed — CI uses OIDC federation.
 
@@ -22,6 +24,8 @@ state_bucket         = "notoriousmcp-tfstate-YOUR_ACCOUNT_ID"
 google_client_id     = "YOUR_GOOGLE_CLIENT_ID"
 google_client_secret = "YOUR_GOOGLE_CLIENT_SECRET"
 admin_google_ids     = "GOOGLE_SUB_ID_1,GOOGLE_SUB_ID_2"
+token_secret         = "YOUR_RANDOM_SECRET_MIN_32_BYTES"
+redirect_url         = "https://YOUR_CLOUDFRONT_DOMAIN/auth/callback"
 
 # Optional — leave domain_name empty to use the CloudFront URL directly
 domain_name = "notoriousmcp.com"
