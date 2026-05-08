@@ -236,7 +236,11 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 
 	clientRedirectURI := payload.ClientRedirectURI
 	if clientRedirectURI == "" {
-		// JSON fallback — useful for CLI/testing where there is no redirect URI.
+		// JSON fallback — intended for CLI/testing flows where there is no redirect URI.
+		// The token is returned directly in the response body and never appears in a URL,
+		// so the security properties differ from the code-exchange path only in that the
+		// caller must protect the response body rather than the redirect. This path should
+		// not be used for browser-based clients.
 		// Issue the access token directly; it never touches a URL here.
 		accessToken, err := IssueAccessToken(h.cfg.TokenSecret, info.Sub)
 		if err != nil {
@@ -272,6 +276,7 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if exchangeCode == "" {
+		log.Printf("auth: exchange code collision exhausted retries for user %s", info.Sub)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -329,6 +334,11 @@ func writeJSONError(w http.ResponseWriter, status int, errCode string) {
 // The MCP client exchanges the short-lived opaque code from the callback
 // redirect for an actual bearer token. The code is single-use: it is deleted
 // atomically on redemption.
+//
+// redirect_uri and client_id are intentionally not validated here. RFC 6749
+// §4.1.3 requires redirect_uri validation only when it was included in the
+// authorization request; enforcing this is tracked in issue #29. client_id
+// validation is not required for public clients (CLI/MCP flows) per RFC 6749 §3.2.1.
 func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -362,6 +372,7 @@ func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"access_token": accessToken,
 		"token_type":   "Bearer",

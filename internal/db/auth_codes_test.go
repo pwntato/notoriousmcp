@@ -59,6 +59,22 @@ func TestAuthCodeNotFound(t *testing.T) {
 	}
 }
 
+func TestAuthCodeCollision(t *testing.T) {
+	c := newTestClient(t)
+	ctx := context.Background()
+
+	code := "testcode-" + uid()
+	userID := "user-" + uid()
+
+	if err := c.SaveAuthCode(ctx, code, userID, 60*time.Second); err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	err := c.SaveAuthCode(ctx, code, userID, 60*time.Second)
+	if !errors.Is(err, db.ErrAuthCodeCollision) {
+		t.Errorf("duplicate save: got %v want ErrAuthCodeCollision", err)
+	}
+}
+
 func TestAuthCodeExpired(t *testing.T) {
 	c := newTestClient(t)
 	ctx := context.Background()

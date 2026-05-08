@@ -324,6 +324,9 @@ func TestTokenEndpointRoundTrip(t *testing.T) {
 	if cc := w.Header().Get("Cache-Control"); cc != "no-store" {
 		t.Errorf("Cache-Control: got %q want no-store", cc)
 	}
+	if p := w.Header().Get("Pragma"); p != "no-cache" {
+		t.Errorf("Pragma: got %q want no-cache", p)
+	}
 
 	var body map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
