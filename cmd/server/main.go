@@ -84,6 +84,7 @@ func init() {
 func lambdaHandler(ctx context.Context, req events.LambdaFunctionURLRequest) (events.LambdaFunctionURLResponse, error) {
 	httpReq, err := toHTTPRequest(ctx, req)
 	if err != nil {
+		log.Printf("toHTTPRequest: %v", err)
 		return events.LambdaFunctionURLResponse{
 			StatusCode: 400,
 			Headers:    map[string]string{"Content-Type": "application/json"},
@@ -100,10 +101,19 @@ func lambdaHandler(ctx context.Context, req events.LambdaFunctionURLRequest) (ev
 		headers[k] = strings.Join(vs, ", ")
 	}
 
+	body := rec.Body.String()
+	isBase64 := false
+	ct := resp.Header.Get("Content-Type")
+	if ct != "" && !strings.HasPrefix(ct, "text/") && !strings.HasPrefix(ct, "application/json") && !strings.HasPrefix(ct, "application/problem+json") {
+		body = base64.StdEncoding.EncodeToString(rec.Body.Bytes())
+		isBase64 = true
+	}
+
 	return events.LambdaFunctionURLResponse{
-		StatusCode: resp.StatusCode,
-		Headers:    headers,
-		Body:       rec.Body.String(),
+		StatusCode:      resp.StatusCode,
+		Headers:         headers,
+		Body:            body,
+		IsBase64Encoded: isBase64,
 	}, nil
 }
 

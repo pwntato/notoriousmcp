@@ -38,6 +38,10 @@ variable "token_secret" {
   type        = string
   sensitive   = true
   description = "HMAC signing secret for access tokens (min 32 bytes)"
+  validation {
+    condition     = length(var.token_secret) >= 32
+    error_message = "token_secret must be at least 32 bytes."
+  }
 }
 
 variable "redirect_url" {
