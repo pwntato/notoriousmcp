@@ -15,3 +15,9 @@ resource "aws_ssm_parameter" "admin_google_ids" {
   type  = "SecureString"
   value = var.admin_google_ids
 }
+
+resource "aws_ssm_parameter" "token_secret" {
+  name  = "/notoriousmcp/${var.environment}/token_secret"
+  type  = "SecureString"
+  value = var.token_secret
+}

@@ -34,6 +34,17 @@ variable "admin_google_ids" {
   description = "Comma-separated Google subject IDs for bootstrap admins"
 }
 
+variable "token_secret" {
+  type        = string
+  sensitive   = true
+  description = "HMAC signing secret for access tokens (min 32 bytes)"
+}
+
+variable "redirect_url" {
+  type        = string
+  description = "Full OAuth callback URL registered in Google Cloud Console (e.g. https://example.com/auth/callback)"
+}
+
 variable "domain_name" {
   type        = string
   default     = ""
