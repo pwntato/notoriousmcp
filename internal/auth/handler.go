@@ -66,6 +66,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", h.wellKnown)
 	mux.HandleFunc("GET /auth/login", h.login)
 	mux.HandleFunc("GET /auth/callback", h.callback)
+	mux.HandleFunc("POST /auth/token", h.token)
 }
 
 // requestScheme returns https when TLS is active or, if trustProxy is true,
@@ -84,12 +85,12 @@ func requestScheme(r *http.Request, trustProxy bool) string {
 }
 
 // wellKnown serves the OAuth 2.0 authorization server metadata required by the MCP spec.
-// token_endpoint is intentionally omitted until issue #4 implements it.
 func (h *Handler) wellKnown(w http.ResponseWriter, r *http.Request) {
 	base := requestScheme(r, h.cfg.TrustProxy) + "://" + r.Host
 	meta := map[string]any{
 		"issuer":                   base,
 		"authorization_endpoint":   base + "/auth/login",
+		"token_endpoint":           base + "/auth/token",
 		"response_types_supported": []string{"code"},
 		"grant_types_supported":    []string{"authorization_code"},
 	}
@@ -233,21 +234,15 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Issue our own short-lived access token.
-	accessToken, err := IssueAccessToken(h.cfg.TokenSecret, info.Sub)
-	if err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	// If the login request included a redirect_uri, send the token there.
-	// Otherwise fall back to returning JSON directly (useful for CLI/testing).
-	// Known limitation: tokens are stateless with a 1h TTL. Revoking a user's
-	// access (DB status change, removal from AdminGoogleIDs) does not invalidate
-	// already-issued tokens — they remain valid until expiry.
 	clientRedirectURI := payload.ClientRedirectURI
 	if clientRedirectURI == "" {
-		// Explicit JSON fallback — not an error condition.
+		// JSON fallback — useful for CLI/testing where there is no redirect URI.
+		// Issue the access token directly; it never touches a URL here.
+		accessToken, err := IssueAccessToken(h.cfg.TokenSecret, info.Sub)
+		if err != nil {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token": accessToken,
@@ -257,15 +252,23 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Issue a short-lived opaque exchange code. The MCP client redeems it via
+	// POST /auth/token — the bearer token never appears in a URL or log.
+	exchangeCode, err := generateState()
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	if err := h.db.SaveAuthCode(ctx, exchangeCode, info.Sub, authCodeTTL); err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	sep := "?"
 	if strings.Contains(clientRedirectURI, "?") {
 		sep = "&"
 	}
-	// The access token is passed as the `code` parameter in the redirect URL,
-	// which means it appears in server logs, Referer headers, and browser history.
-	// Tracked in issue #21: implement a short-lived opaque code exchange so the
-	// bearer token is never exposed in a URL.
-	target := clientRedirectURI + sep + "code=" + accessToken
+	target := clientRedirectURI + sep + "code=" + url.QueryEscape(exchangeCode)
 	if payload.ClientState != "" {
 		target += "&state=" + url.QueryEscape(payload.ClientState)
 	}
@@ -298,7 +301,67 @@ func ValidateRedirectURI(configuredRedirectURL, clientRedirectURI string) error 
 	return nil
 }
 
-const googleUserInfoURL = "https://openidconnect.googleapis.com/v1/userinfo"
+const (
+	googleUserInfoURL = "https://openidconnect.googleapis.com/v1/userinfo"
+	authCodeTTL       = 60 * time.Second
+)
+
+// token handles POST /auth/token — the RFC 6749 §4.1.3 token endpoint.
+// The MCP client exchanges the short-lived opaque code from the callback
+// redirect for an actual bearer token. The code is single-use: it is deleted
+// atomically on redemption.
+func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	grantType := r.FormValue("grant_type")
+	if grantType != "authorization_code" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": "unsupported_grant_type",
+		})
+		return
+	}
+
+	code := r.FormValue("code")
+	if code == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": "invalid_request",
+		})
+		return
+	}
+
+	userID, err := h.db.RedeemAuthCode(ctx, code)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": "invalid_grant",
+		})
+		return
+	}
+
+	accessToken, err := IssueAccessToken(h.cfg.TokenSecret, userID)
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"access_token": accessToken,
+		"token_type":   "Bearer",
+		"expires_in":   int(accessTokenTTL.Seconds()),
+	})
+}
 
 type googleUserInfo struct {
 	Sub   string `json:"sub"`

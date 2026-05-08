@@ -53,9 +53,8 @@ func TestWellKnown(t *testing.T) {
 	if meta["authorization_endpoint"] != "http://example.com/auth/login" {
 		t.Errorf("authorization_endpoint: got %v", meta["authorization_endpoint"])
 	}
-	// token_endpoint should not be present until implemented.
-	if _, ok := meta["token_endpoint"]; ok {
-		t.Error("token_endpoint should not be advertised until implemented")
+	if meta["token_endpoint"] != "http://example.com/auth/token" {
+		t.Errorf("token_endpoint: got %v", meta["token_endpoint"])
 	}
 }
 
@@ -236,6 +235,61 @@ func TestCallbackOAuthError(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "denied") {
 		t.Errorf("body should contain denial message, got: %q", w.Body.String())
 	}
+}
+
+func TestTokenEndpointMissingCode(t *testing.T) {
+	h := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("POST", "/auth/token",
+		strings.NewReader("grant_type=authorization_code"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d want 400 for missing code", w.Code)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["error"] != "invalid_request" {
+		t.Errorf("error: got %q want invalid_request", body["error"])
+	}
+}
+
+func TestTokenEndpointWrongGrantType(t *testing.T) {
+	h := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("POST", "/auth/token",
+		strings.NewReader("grant_type=client_credentials&code=abc"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d want 400 for wrong grant_type", w.Code)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["error"] != "unsupported_grant_type" {
+		t.Errorf("error: got %q want unsupported_grant_type", body["error"])
+	}
+}
+
+func TestTokenEndpointInvalidCode(t *testing.T) {
+	// With a nil db, RedeemAuthCode will panic — this test verifies the handler
+	// reaches the DB call and returns 400 for a code that doesn't exist.
+	// Since the test handler uses a nil db we can't exercise a real redeem;
+	// that path is covered by the integration test in db/auth_codes_test.go.
+	// This test is deliberately skipped — kept as a marker for the integration path.
+	t.Skip("invalid code path requires real DB — see db/auth_codes_test.go")
 }
 
 func TestConfigValidate(t *testing.T) {
