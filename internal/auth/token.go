@@ -70,8 +70,8 @@ func sign(secret []byte, data string) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-// generateState returns a random state string for CSRF protection.
-func generateState() (string, error) {
+// generateRandomCode returns a cryptographically random URL-safe string.
+func generateRandomCode() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		return "", err

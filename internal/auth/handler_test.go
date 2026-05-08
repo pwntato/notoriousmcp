@@ -1,13 +1,16 @@
 package auth_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pwntato/notoriousmcp/internal/auth"
+	"github.com/pwntato/notoriousmcp/internal/db"
 )
 
 func newTestHandler(t *testing.T) *auth.Handler {
@@ -53,9 +56,8 @@ func TestWellKnown(t *testing.T) {
 	if meta["authorization_endpoint"] != "http://example.com/auth/login" {
 		t.Errorf("authorization_endpoint: got %v", meta["authorization_endpoint"])
 	}
-	// token_endpoint should not be present until implemented.
-	if _, ok := meta["token_endpoint"]; ok {
-		t.Error("token_endpoint should not be advertised until implemented")
+	if meta["token_endpoint"] != "http://example.com/auth/token" {
+		t.Errorf("token_endpoint: got %v", meta["token_endpoint"])
 	}
 }
 
@@ -235,6 +237,160 @@ func TestCallbackOAuthError(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "denied") {
 		t.Errorf("body should contain denial message, got: %q", w.Body.String())
+	}
+}
+
+func TestTokenEndpointMissingCode(t *testing.T) {
+	h := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("POST", "/auth/token",
+		strings.NewReader("grant_type=authorization_code"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d want 400 for missing code", w.Code)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["error"] != "invalid_request" {
+		t.Errorf("error: got %q want invalid_request", body["error"])
+	}
+}
+
+func TestTokenEndpointWrongGrantType(t *testing.T) {
+	h := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("POST", "/auth/token",
+		strings.NewReader("grant_type=client_credentials&code=abc"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d want 400 for wrong grant_type", w.Code)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["error"] != "unsupported_grant_type" {
+		t.Errorf("error: got %q want unsupported_grant_type", body["error"])
+	}
+}
+
+// ---- integration tests (require DYNAMODB_ENDPOINT) ----
+
+func newTestHandlerWithDB(t *testing.T) (*auth.Handler, *db.Client) {
+	t.Helper()
+	dbClient := newTestDBClient(t)
+	cfg := auth.Config{
+		ClientID:     "test-client-id",
+		ClientSecret: "test-client-secret",
+		RedirectURL:  "https://example.com/auth/callback",
+		TokenSecret:  []byte("test-secret-key-at-least-32-bytes!!"),
+		TrustProxy:   true,
+	}
+	return auth.New(cfg, dbClient), dbClient
+}
+
+func TestTokenEndpointRoundTrip(t *testing.T) {
+	h, dbClient := newTestHandlerWithDB(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	userID := "user-" + randUID()
+	code := "code-" + randUID()
+	if err := dbClient.SaveAuthCode(context.Background(), code, userID, 60*time.Second); err != nil {
+		t.Fatalf("save auth code: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/auth/token",
+		strings.NewReader("grant_type=authorization_code&code="+code))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200, body: %s", w.Code, w.Body.String())
+	}
+	if cc := w.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("Cache-Control: got %q want no-store", cc)
+	}
+	if p := w.Header().Get("Pragma"); p != "no-cache" {
+		t.Errorf("Pragma: got %q want no-cache", p)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["token_type"] != "Bearer" {
+		t.Errorf("token_type: got %v", body["token_type"])
+	}
+	if body["access_token"] == "" {
+		t.Error("access_token should be non-empty")
+	}
+}
+
+func TestTokenEndpointInvalidCode(t *testing.T) {
+	h, _ := newTestHandlerWithDB(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("POST", "/auth/token",
+		strings.NewReader("grant_type=authorization_code&code=no-such-code"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d want 400", w.Code)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["error"] != "invalid_grant" {
+		t.Errorf("error: got %q want invalid_grant", body["error"])
+	}
+}
+
+func TestTokenEndpointSingleUse(t *testing.T) {
+	h, dbClient := newTestHandlerWithDB(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	userID := "user-" + randUID()
+	code := "code-" + randUID()
+	if err := dbClient.SaveAuthCode(context.Background(), code, userID, 60*time.Second); err != nil {
+		t.Fatalf("save auth code: %v", err)
+	}
+
+	body := strings.NewReader("grant_type=authorization_code&code=" + code)
+	req := httptest.NewRequest("POST", "/auth/token", body)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("first redeem: got %d want 200", w.Code)
+	}
+
+	// Second attempt with the same code must be rejected.
+	body2 := strings.NewReader("grant_type=authorization_code&code=" + code)
+	req2 := httptest.NewRequest("POST", "/auth/token", body2)
+	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w2 := httptest.NewRecorder()
+	mux.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusBadRequest {
+		t.Errorf("second redeem: got %d want 400", w2.Code)
 	}
 }
 
