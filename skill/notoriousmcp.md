@@ -1,6 +1,6 @@
-# NoteoriousMCP Skill
+# NotoriousMCP Skill
 
-NoteoriousMCP is a self-hosted MCP server for notes, todo lists, files, and LLM memory — backed by AWS Lambda + DynamoDB + S3. This skill teaches you when and how to use its tools effectively.
+NotoriousMCP is a self-hosted MCP server for notes, todo lists, files, and LLM memory — backed by AWS Lambda + DynamoDB + S3. This skill teaches you when and how to use its tools effectively.
 
 ## Installation
 
@@ -18,14 +18,23 @@ New accounts start as `pending` and only have access to `check_status`. An admin
 
 ## Session Start
 
-At the start of each session, load any persistent memory you've stored:
+At the start of each session, load any persistent memory you've stored. A recommended layout:
 
 ```
-get_file("memory/MEMORY.md")       # index, then fetch individual files as needed
+memory/MEMORY.md      # index: topic → file path
+memory/user.md
+memory/project_foo.md
+memory/feedback.md
+```
+
+Fetch the index first, then individual files as needed:
+
+```
+get_file("memory/MEMORY.md")
 get_file("memory/<topic>.md")
 ```
 
-If `memory/MEMORY.md` doesn't exist yet, skip silently — the user hasn't set up server-side memory yet.
+If `memory/MEMORY.md` doesn't exist yet, skip silently — the user hasn't set up server-side memory yet. This mirrors the local `~/.claude/` memory system but stores data server-side, available across machines.
 
 ## Session End
 
@@ -50,7 +59,7 @@ delete_note(note_id)
 
 - `search_notes` returns metadata only (no content). Use `get_note` to fetch content.
 - Pass `modified_since` (ISO 8601) to fetch only recently changed notes — useful for sync.
-- On update, pass `version` matching the current stored version for conflict-safe writes. Omitting `version` auto-increments and skips conflict detection.
+- On update, pass `version` matching the current stored version for conflict-safe writes. Omit `version` to auto-increment (skips conflict detection).
 - Content limit: 1MB.
 
 ### Todo Lists (user+)
@@ -103,25 +112,12 @@ update_user(user_id, status)
 check_status()    → account status message
 ```
 
-## Memory Pattern
-
-Use `save_file` / `get_file` to persist Claude Code memory on the server. A simple layout:
-
-```
-memory/MEMORY.md          # index of topics → file paths
-memory/user.md
-memory/project_foo.md
-memory/feedback.md
-```
-
-Load `memory/MEMORY.md` at session start, then fetch individual files as needed. Save changes before ending the session. This mirrors the local `~/.claude/` memory system but stores data server-side, shared across machines.
-
 ## Conflict-Safe Writes
 
 Every saved item has a `version` integer. To update safely:
 
 1. Read the item (note, file, todo, etc.) — the response includes `version`.
 2. Pass that `version` back in your `save_*` call.
-3. If another writer changed it in the meantime, the server returns a version conflict error — re-read and retry.
+3. If another writer changed it in the meantime, the tool result will have `isError: true` with the text `"version conflict: reload and retry"` — re-read the item and retry.
 
 Omitting `version` on an update silently auto-increments and skips conflict detection. This is fine for single-writer sessions; use explicit `version` when multiple clients or sessions may write the same item.
