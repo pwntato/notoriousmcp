@@ -12,7 +12,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-var ErrAuthCodeNotFound = errors.New("auth code not found or expired")
+var (
+	ErrAuthCodeNotFound = errors.New("auth code not found or expired")
+	ErrAuthCodeCollision = errors.New("auth code collision")
+)
+
+const authCodeSK = "AUTHCODE"
 
 type authCodeRecord struct {
 	PK        string `dynamodbav:"PK"`
@@ -22,14 +27,13 @@ type authCodeRecord struct {
 }
 
 func authCodePK(code string) string { return "AUTHCODE#" + code }
-func authCodeSK() string            { return "AUTHCODE" }
 
 // SaveAuthCode stores a short-lived opaque exchange code mapped to a user ID.
 // ExpiresAt is written as a Unix epoch integer for DynamoDB TTL compatibility.
 func (c *Client) SaveAuthCode(ctx context.Context, code, userID string, ttl time.Duration) error {
 	rec := authCodeRecord{
 		PK:        authCodePK(code),
-		SK:        authCodeSK(),
+		SK:        authCodeSK,
 		UserID:    userID,
 		ExpiresAt: time.Now().Add(ttl).Unix(),
 	}
@@ -45,8 +49,7 @@ func (c *Client) SaveAuthCode(ctx context.Context, code, userID string, ttl time
 	if err != nil {
 		var cfe *types.ConditionalCheckFailedException
 		if errors.As(err, &cfe) {
-			// Code collision — callers should generate a new code and retry.
-			return fmt.Errorf("auth code already exists: %w", ErrAuthCodeNotFound)
+			return ErrAuthCodeCollision
 		}
 		return fmt.Errorf("save auth code: %w", err)
 	}
@@ -62,7 +65,7 @@ func (c *Client) RedeemAuthCode(ctx context.Context, code string) (string, error
 		TableName: aws.String(c.tableName),
 		Key: map[string]types.AttributeValue{
 			"PK": &types.AttributeValueMemberS{Value: authCodePK(code)},
-			"SK": &types.AttributeValueMemberS{Value: authCodeSK()},
+			"SK": &types.AttributeValueMemberS{Value: authCodeSK},
 		},
 		ReturnValues: types.ReturnValueAllOld,
 	})

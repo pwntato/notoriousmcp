@@ -118,7 +118,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	nonce, err := generateState()
+	nonce, err := generateRandomCode()
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -254,12 +254,24 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 
 	// Issue a short-lived opaque exchange code. The MCP client redeems it via
 	// POST /auth/token — the bearer token never appears in a URL or log.
-	exchangeCode, err := generateState()
-	if err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
+	// Retry once on the astronomically unlikely collision (128-bit random key space).
+	var exchangeCode string
+	for range 2 {
+		var code string
+		code, err = generateRandomCode()
+		if err != nil {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		if saveErr := h.db.SaveAuthCode(ctx, code, info.Sub, authCodeTTL); saveErr == nil {
+			exchangeCode = code
+			break
+		} else if !errors.Is(saveErr, db.ErrAuthCodeCollision) {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
 	}
-	if err := h.db.SaveAuthCode(ctx, exchangeCode, info.Sub, authCodeTTL); err != nil {
+	if exchangeCode == "" {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -306,6 +318,13 @@ const (
 	authCodeTTL       = 60 * time.Second
 )
 
+// writeJSONError writes an RFC 6749-style JSON error response.
+func writeJSONError(w http.ResponseWriter, status int, errCode string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": errCode})
+}
+
 // token handles POST /auth/token — the RFC 6749 §4.1.3 token endpoint.
 // The MCP client exchanges the short-lived opaque code from the callback
 // redirect for an actual bearer token. The code is single-use: it is deleted
@@ -318,33 +337,20 @@ func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	grantType := r.FormValue("grant_type")
-	if grantType != "authorization_code" {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"error": "unsupported_grant_type",
-		})
+	if r.FormValue("grant_type") != "authorization_code" {
+		writeJSONError(w, http.StatusBadRequest, "unsupported_grant_type")
 		return
 	}
 
 	code := r.FormValue("code")
 	if code == "" {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"error": "invalid_request",
-		})
+		writeJSONError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
 
 	userID, err := h.db.RedeemAuthCode(ctx, code)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"error": "invalid_grant",
-		})
+		writeJSONError(w, http.StatusBadRequest, "invalid_grant")
 		return
 	}
 

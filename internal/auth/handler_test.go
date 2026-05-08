@@ -1,13 +1,16 @@
 package auth_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pwntato/notoriousmcp/internal/auth"
+	"github.com/pwntato/notoriousmcp/internal/db"
 )
 
 func newTestHandler(t *testing.T) *auth.Handler {
@@ -283,13 +286,109 @@ func TestTokenEndpointWrongGrantType(t *testing.T) {
 	}
 }
 
+// ---- integration tests (require DYNAMODB_ENDPOINT) ----
+
+func newTestHandlerWithDB(t *testing.T) (*auth.Handler, *db.Client) {
+	t.Helper()
+	dbClient := newTestDBClient(t)
+	cfg := auth.Config{
+		ClientID:     "test-client-id",
+		ClientSecret: "test-client-secret",
+		RedirectURL:  "https://example.com/auth/callback",
+		TokenSecret:  []byte("test-secret-key-at-least-32-bytes!!"),
+		TrustProxy:   true,
+	}
+	return auth.New(cfg, dbClient), dbClient
+}
+
+func TestTokenEndpointRoundTrip(t *testing.T) {
+	h, dbClient := newTestHandlerWithDB(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	userID := "user-" + randUID()
+	code := "code-" + randUID()
+	if err := dbClient.SaveAuthCode(context.Background(), code, userID, 60*time.Second); err != nil {
+		t.Fatalf("save auth code: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/auth/token",
+		strings.NewReader("grant_type=authorization_code&code="+code))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200, body: %s", w.Code, w.Body.String())
+	}
+	if cc := w.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("Cache-Control: got %q want no-store", cc)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["token_type"] != "Bearer" {
+		t.Errorf("token_type: got %v", body["token_type"])
+	}
+	if body["access_token"] == "" {
+		t.Error("access_token should be non-empty")
+	}
+}
+
 func TestTokenEndpointInvalidCode(t *testing.T) {
-	// With a nil db, RedeemAuthCode will panic — this test verifies the handler
-	// reaches the DB call and returns 400 for a code that doesn't exist.
-	// Since the test handler uses a nil db we can't exercise a real redeem;
-	// that path is covered by the integration test in db/auth_codes_test.go.
-	// This test is deliberately skipped — kept as a marker for the integration path.
-	t.Skip("invalid code path requires real DB — see db/auth_codes_test.go")
+	h, _ := newTestHandlerWithDB(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("POST", "/auth/token",
+		strings.NewReader("grant_type=authorization_code&code=no-such-code"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d want 400", w.Code)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["error"] != "invalid_grant" {
+		t.Errorf("error: got %q want invalid_grant", body["error"])
+	}
+}
+
+func TestTokenEndpointSingleUse(t *testing.T) {
+	h, dbClient := newTestHandlerWithDB(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	userID := "user-" + randUID()
+	code := "code-" + randUID()
+	if err := dbClient.SaveAuthCode(context.Background(), code, userID, 60*time.Second); err != nil {
+		t.Fatalf("save auth code: %v", err)
+	}
+
+	body := strings.NewReader("grant_type=authorization_code&code=" + code)
+	req := httptest.NewRequest("POST", "/auth/token", body)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("first redeem: got %d want 200", w.Code)
+	}
+
+	// Second attempt with the same code must be rejected.
+	body2 := strings.NewReader("grant_type=authorization_code&code=" + code)
+	req2 := httptest.NewRequest("POST", "/auth/token", body2)
+	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w2 := httptest.NewRecorder()
+	mux.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusBadRequest {
+		t.Errorf("second redeem: got %d want 400", w2.Code)
+	}
 }
 
 func TestConfigValidate(t *testing.T) {
