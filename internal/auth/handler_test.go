@@ -425,33 +425,34 @@ func TestTokenEndpointRedirectURIMismatch(t *testing.T) {
 	}
 }
 
-func TestTokenEndpointRedirectURIMatch(t *testing.T) {
+func TestTokenEndpointRedirectURIOmitted(t *testing.T) {
+	// A token request that omits redirect_uri when the stored code has one bound
+	// must be rejected — empty string does not match a stored URI.
 	h, dbClient := newTestHandlerWithDB(t)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
 	userID := "user-" + randUID()
 	code := "code-" + randUID()
-	redirectURI := "https://example.com/auth/callback"
-	if err := dbClient.SaveAuthCode(context.Background(), code, userID, redirectURI, 60*time.Second); err != nil {
+	if err := dbClient.SaveAuthCode(context.Background(), code, userID, "https://example.com/auth/callback", 60*time.Second); err != nil {
 		t.Fatalf("save auth code: %v", err)
 	}
 
 	req := httptest.NewRequest("POST", "/auth/token",
-		strings.NewReader("grant_type=authorization_code&code="+code+"&redirect_uri="+redirectURI))
+		strings.NewReader("grant_type=authorization_code&code="+code))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status: got %d want 200, body: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want 400 for omitted redirect_uri", w.Code)
 	}
-	var body map[string]any
+	var body map[string]string
 	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if body["access_token"] == "" {
-		t.Error("access_token should be non-empty")
+	if body["error"] != "invalid_grant" {
+		t.Errorf("error: got %q want invalid_grant", body["error"])
 	}
 }
 

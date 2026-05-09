@@ -362,10 +362,19 @@ func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// RFC 6749 §4.1.3: if redirect_uri was included in the authorization request,
-	// the same value must be present and match exactly at the token endpoint.
-	tokenRedirectURI := r.FormValue("redirect_uri")
-	if redeemed.RedirectURI != tokenRedirectURI {
+	// Defensively reject codes with no stored redirect_uri. By construction the
+	// callback handler only calls SaveAuthCode after the early-return JSON path
+	// (which handles the no-redirect_uri case inline), so RedirectURI is always
+	// non-empty here. Treat a missing value as a corrupted/invalid code rather
+	// than silently accepting any redirect_uri the client presents.
+	if redeemed.RedirectURI == "" {
+		writeJSONError(w, http.StatusBadRequest, "invalid_grant")
+		return
+	}
+
+	// RFC 6749 §4.1.3: the redirect_uri presented at the token endpoint must
+	// exactly match the value stored when the auth code was issued.
+	if redeemed.RedirectURI != r.FormValue("redirect_uri") {
 		writeJSONError(w, http.StatusBadRequest, "invalid_grant")
 		return
 	}
