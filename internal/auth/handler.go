@@ -267,7 +267,7 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
-		if saveErr := h.db.SaveAuthCode(ctx, code, info.Sub, authCodeTTL); saveErr == nil {
+		if saveErr := h.db.SaveAuthCode(ctx, code, info.Sub, clientRedirectURI, authCodeTTL); saveErr == nil {
 			exchangeCode = code
 			break
 		} else if !errors.Is(saveErr, db.ErrAuthCodeCollision) {
@@ -335,10 +335,8 @@ func writeJSONError(w http.ResponseWriter, status int, errCode string) {
 // redirect for an actual bearer token. The code is single-use: it is deleted
 // atomically on redemption.
 //
-// redirect_uri and client_id are intentionally not validated here. RFC 6749
-// §4.1.3 requires redirect_uri validation only when it was included in the
-// authorization request; enforcing this is tracked in issue #29. client_id
-// validation is not required for public clients (CLI/MCP flows) per RFC 6749 §3.2.1.
+// client_id validation is not required for public clients (CLI/MCP flows)
+// per RFC 6749 §3.2.1.
 func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -358,13 +356,30 @@ func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID, err := h.db.RedeemAuthCode(ctx, code)
+	redeemed, err := h.db.RedeemAuthCode(ctx, code)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid_grant")
 		return
 	}
 
-	accessToken, err := IssueAccessToken(h.cfg.TokenSecret, userID)
+	// Defensively reject codes with no stored redirect_uri. By construction the
+	// callback handler only calls SaveAuthCode after the early-return JSON path
+	// (which handles the no-redirect_uri case inline), so RedirectURI is always
+	// non-empty here. Treat a missing value as a corrupted/invalid code rather
+	// than silently accepting any redirect_uri the client presents.
+	if redeemed.RedirectURI == "" {
+		writeJSONError(w, http.StatusBadRequest, "invalid_grant")
+		return
+	}
+
+	// RFC 6749 §4.1.3: the redirect_uri presented at the token endpoint must
+	// exactly match the value stored when the auth code was issued.
+	if redeemed.RedirectURI != r.FormValue("redirect_uri") {
+		writeJSONError(w, http.StatusBadRequest, "invalid_grant")
+		return
+	}
+
+	accessToken, err := IssueAccessToken(h.cfg.TokenSecret, redeemed.UserID)
 	if err != nil {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return

@@ -20,22 +20,26 @@ var (
 const authCodeSK = "AUTHCODE"
 
 type authCodeRecord struct {
-	PK        string `dynamodbav:"PK"`
-	SK        string `dynamodbav:"SK"`
-	UserID    string `dynamodbav:"UserID"`
-	ExpiresAt int64  `dynamodbav:"ExpiresAt"`
+	PK          string `dynamodbav:"PK"`
+	SK          string `dynamodbav:"SK"`
+	UserID      string `dynamodbav:"UserID"`
+	RedirectURI string `dynamodbav:"RedirectURI"`
+	ExpiresAt   int64  `dynamodbav:"ExpiresAt"`
 }
 
 func authCodePK(code string) string { return "AUTHCODE#" + code }
 
 // SaveAuthCode stores a short-lived opaque exchange code mapped to a user ID.
+// redirectURI is the redirect_uri from the authorization request; callers must
+// pass a non-empty value — RedeemAuthCode rejects codes stored without one.
 // ExpiresAt is written as a Unix epoch integer for DynamoDB TTL compatibility.
-func (c *Client) SaveAuthCode(ctx context.Context, code, userID string, ttl time.Duration) error {
+func (c *Client) SaveAuthCode(ctx context.Context, code, userID, redirectURI string, ttl time.Duration) error {
 	rec := authCodeRecord{
-		PK:        authCodePK(code),
-		SK:        authCodeSK,
-		UserID:    userID,
-		ExpiresAt: time.Now().Add(ttl).Unix(),
+		PK:          authCodePK(code),
+		SK:          authCodeSK,
+		UserID:      userID,
+		RedirectURI: redirectURI,
+		ExpiresAt:   time.Now().Add(ttl).Unix(),
 	}
 	item, err := attributevalue.MarshalMap(rec)
 	if err != nil {
@@ -56,11 +60,17 @@ func (c *Client) SaveAuthCode(ctx context.Context, code, userID string, ttl time
 	return nil
 }
 
-// RedeemAuthCode atomically deletes the code and returns the associated user ID.
+// RedeemedAuthCode holds the values recovered when an exchange code is redeemed.
+type RedeemedAuthCode struct {
+	UserID      string
+	RedirectURI string // empty if none was bound at save time
+}
+
+// RedeemAuthCode atomically deletes the code and returns the associated values.
 // Returns ErrAuthCodeNotFound if the code does not exist, was already redeemed,
 // or has passed its ExpiresAt (checked in-process after the delete).
 // Single-use is guaranteed by the delete: a second caller will find no item.
-func (c *Client) RedeemAuthCode(ctx context.Context, code string) (string, error) {
+func (c *Client) RedeemAuthCode(ctx context.Context, code string) (RedeemedAuthCode, error) {
 	out, err := c.ddb.DeleteItem(ctx, &dynamodb.DeleteItemInput{
 		TableName: aws.String(c.tableName),
 		Key: map[string]types.AttributeValue{
@@ -70,21 +80,21 @@ func (c *Client) RedeemAuthCode(ctx context.Context, code string) (string, error
 		ReturnValues: types.ReturnValueAllOld,
 	})
 	if err != nil {
-		return "", fmt.Errorf("redeem auth code: %w", err)
+		return RedeemedAuthCode{}, fmt.Errorf("redeem auth code: %w", err)
 	}
 	if len(out.Attributes) == 0 {
-		return "", ErrAuthCodeNotFound
+		return RedeemedAuthCode{}, ErrAuthCodeNotFound
 	}
 
 	var rec authCodeRecord
 	if err := attributevalue.UnmarshalMap(out.Attributes, &rec); err != nil {
-		return "", fmt.Errorf("unmarshal auth code: %w", err)
+		return RedeemedAuthCode{}, fmt.Errorf("unmarshal auth code: %w", err)
 	}
 
 	// DynamoDB TTL expiry is eventual; check expiry ourselves to be precise.
 	if time.Now().Unix() > rec.ExpiresAt {
-		return "", ErrAuthCodeNotFound
+		return RedeemedAuthCode{}, ErrAuthCodeNotFound
 	}
 
-	return rec.UserID, nil
+	return RedeemedAuthCode{UserID: rec.UserID, RedirectURI: rec.RedirectURI}, nil
 }
