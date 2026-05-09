@@ -308,12 +308,13 @@ func TestTokenEndpointRoundTrip(t *testing.T) {
 
 	userID := "user-" + randUID()
 	code := "code-" + randUID()
-	if err := dbClient.SaveAuthCode(context.Background(), code, userID, 60*time.Second); err != nil {
+	redirectURI := "https://example.com/auth/callback"
+	if err := dbClient.SaveAuthCode(context.Background(), code, userID, redirectURI, 60*time.Second); err != nil {
 		t.Fatalf("save auth code: %v", err)
 	}
 
 	req := httptest.NewRequest("POST", "/auth/token",
-		strings.NewReader("grant_type=authorization_code&code="+code))
+		strings.NewReader("grant_type=authorization_code&code="+code+"&redirect_uri="+redirectURI))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -370,11 +371,12 @@ func TestTokenEndpointSingleUse(t *testing.T) {
 
 	userID := "user-" + randUID()
 	code := "code-" + randUID()
-	if err := dbClient.SaveAuthCode(context.Background(), code, userID, 60*time.Second); err != nil {
+	redirectURI := "https://example.com/auth/callback"
+	if err := dbClient.SaveAuthCode(context.Background(), code, userID, redirectURI, 60*time.Second); err != nil {
 		t.Fatalf("save auth code: %v", err)
 	}
 
-	body := strings.NewReader("grant_type=authorization_code&code=" + code)
+	body := strings.NewReader("grant_type=authorization_code&code=" + code + "&redirect_uri=" + redirectURI)
 	req := httptest.NewRequest("POST", "/auth/token", body)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
@@ -384,13 +386,72 @@ func TestTokenEndpointSingleUse(t *testing.T) {
 	}
 
 	// Second attempt with the same code must be rejected.
-	body2 := strings.NewReader("grant_type=authorization_code&code=" + code)
+	body2 := strings.NewReader("grant_type=authorization_code&code=" + code + "&redirect_uri=" + redirectURI)
 	req2 := httptest.NewRequest("POST", "/auth/token", body2)
 	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w2 := httptest.NewRecorder()
 	mux.ServeHTTP(w2, req2)
 	if w2.Code != http.StatusBadRequest {
 		t.Errorf("second redeem: got %d want 400", w2.Code)
+	}
+}
+
+func TestTokenEndpointRedirectURIMismatch(t *testing.T) {
+	h, dbClient := newTestHandlerWithDB(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	userID := "user-" + randUID()
+	code := "code-" + randUID()
+	if err := dbClient.SaveAuthCode(context.Background(), code, userID, "https://example.com/auth/callback", 60*time.Second); err != nil {
+		t.Fatalf("save auth code: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/auth/token",
+		strings.NewReader("grant_type=authorization_code&code="+code+"&redirect_uri=https://evil.com/steal"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want 400 for redirect_uri mismatch", w.Code)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["error"] != "invalid_grant" {
+		t.Errorf("error: got %q want invalid_grant", body["error"])
+	}
+}
+
+func TestTokenEndpointRedirectURIMatch(t *testing.T) {
+	h, dbClient := newTestHandlerWithDB(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	userID := "user-" + randUID()
+	code := "code-" + randUID()
+	redirectURI := "https://example.com/auth/callback"
+	if err := dbClient.SaveAuthCode(context.Background(), code, userID, redirectURI, 60*time.Second); err != nil {
+		t.Fatalf("save auth code: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/auth/token",
+		strings.NewReader("grant_type=authorization_code&code="+code+"&redirect_uri="+redirectURI))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200, body: %s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["access_token"] == "" {
+		t.Error("access_token should be non-empty")
 	}
 }
 
