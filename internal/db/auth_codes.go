@@ -30,7 +30,8 @@ type authCodeRecord struct {
 func authCodePK(code string) string { return "AUTHCODE#" + code }
 
 // SaveAuthCode stores a short-lived opaque exchange code mapped to a user ID.
-// redirectURI is the redirect_uri from the authorization request (may be empty).
+// redirectURI is the redirect_uri from the authorization request; callers must
+// pass a non-empty value — RedeemAuthCode rejects codes stored without one.
 // ExpiresAt is written as a Unix epoch integer for DynamoDB TTL compatibility.
 func (c *Client) SaveAuthCode(ctx context.Context, code, userID, redirectURI string, ttl time.Duration) error {
 	rec := authCodeRecord{
