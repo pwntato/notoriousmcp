@@ -151,6 +151,22 @@ func (c *Client) DeleteRefreshToken(ctx context.Context, userID string) error {
 	return nil
 }
 
+// DeleteUser removes the user's PROFILE record. Used in tests to clean up
+// after each test case. It is a no-op if the user does not exist.
+func (c *Client) DeleteUser(ctx context.Context, userID string) error {
+	_, err := c.ddb.DeleteItem(ctx, &dynamodb.DeleteItemInput{
+		TableName: aws.String(c.tableName),
+		Key: map[string]types.AttributeValue{
+			"PK": &types.AttributeValueMemberS{Value: pk(userID)},
+			"SK": &types.AttributeValueMemberS{Value: profileSK()},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	return nil
+}
+
 // UpdateUserStatus sets a user's status field only.
 func (c *Client) UpdateUserStatus(ctx context.Context, userID string, status models.UserStatus) error {
 	_, err := c.ddb.UpdateItem(ctx, &dynamodb.UpdateItemInput{

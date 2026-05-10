@@ -63,7 +63,7 @@ delete_note(note_id)
 
 - `search_notes` returns metadata only (no content). Use `get_note` to fetch content.
 - Pass `modified_since` (ISO 8601) to fetch only recently changed notes — useful for sync.
-- On update, pass `version` matching the current stored version for conflict-safe writes. Omit `version` to auto-increment (skips conflict detection).
+- On update, pass `version` set to the **current version + 1** (i.e. the version you want to store). The server checks that the stored version equals `version - 1`. Omit `version` to auto-increment (skips conflict detection).
 - Content limit: 1MB.
 
 ### Todo Lists (user+)
@@ -124,7 +124,9 @@ check_status()    → account status message
 Every saved item has a `version` integer. To update safely:
 
 1. Read the item (note, file, todo, etc.) — the response includes `version`.
-2. Pass that `version` back in your `save_*` call.
+2. Pass `version + 1` in your `save_*` call (the version you want to store, not the one you read).
 3. If another writer changed it in the meantime, the tool result will have `isError: true` with the text `"version conflict: reload and retry"` — re-read the item and retry.
+
+Example: read returns `"version": 3` → pass `"version": 4` in the update.
 
 Omitting `version` on an update silently auto-increments and skips conflict detection. This is fine for single-writer sessions; use explicit `version` when multiple clients or sessions may write the same item.
