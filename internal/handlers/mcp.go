@@ -399,6 +399,9 @@ func newID() string {
 // int64ArgOpt reads an optional numeric argument as int64, returning (0, false)
 // if absent. Returns (value, true) if present; caller should pass -1 to mean
 // "clear the cap" so that 0 is distinguishable from "not provided".
+// Logs a warning and returns (0, false) if the field is present but not a
+// recognized numeric type — treats it the same as absent rather than erroring,
+// matching the soft-validation style of other optional args.
 func int64ArgOpt(args map[string]any, key string) (int64, bool) {
 	v, ok := args[key]
 	if !ok {
@@ -411,8 +414,10 @@ func int64ArgOpt(args map[string]any, key string) (int64, bool) {
 		return n, true
 	case int:
 		return int64(n), true
+	default:
+		log.Printf("mcp: arg %q: unexpected type %T, ignoring", key, v)
+		return 0, false
 	}
-	return 0, false
 }
 
 // versionArg reads the optional "version" argument as int.

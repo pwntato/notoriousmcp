@@ -884,6 +884,34 @@ func TestIntegrationStorageCapEnforced(t *testing.T) {
 	}
 }
 
+func TestIntegrationFileStorageCapEnforced(t *testing.T) {
+	dbClient, storeClient := newTestClients(t)
+	user := saveIntegrationUser(t, dbClient, models.StatusUser)
+	// Cap is 10 bytes — any real file content will exceed it.
+	h := newIntegrationHandlerWithConfig(t, dbClient, storeClient, handlers.Config{
+		DefaultStorageCap:  10,
+		DefaultTransferCap: handlers.DefaultTransferCapBytes,
+	})
+
+	resp := doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name": "save_file",
+		"arguments": map[string]any{
+			"path":    "test/cap-test.txt",
+			"content": "this content is definitely more than 10 bytes",
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("unexpected RPC error: %+v", resp.Error)
+	}
+	var result struct{ IsError bool }
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !result.IsError {
+		t.Error("expected isError=true when file storage cap exceeded")
+	}
+}
+
 func TestIntegrationTransferCapEnforced(t *testing.T) {
 	dbClient, storeClient := newTestClients(t)
 	user := saveIntegrationUser(t, dbClient, models.StatusUser)

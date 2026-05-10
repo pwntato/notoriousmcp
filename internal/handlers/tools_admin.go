@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"sync"
 
@@ -10,7 +11,9 @@ import (
 	"github.com/pwntato/notoriousmcp/internal/models"
 )
 
-// userWithUsage wraps a User and adds computed usage percentage fields for admins.
+// userWithUsage wraps a User with computed usage percentages for the admin
+// list_users response. This is the only path where User is serialized to JSON;
+// both list_users and update_user are admin-only tools.
 type userWithUsage struct {
 	models.User
 	StorageUsedPct  int `json:"storage_used_pct"`
@@ -36,6 +39,7 @@ func (h *Handler) handleListUsers(ctx context.Context, args map[string]any) (*to
 
 	month := currentMonth()
 	out := make([]userWithUsage, len(users))
+	errc := make(chan error, len(users))
 
 	// Fetch per-user transfer totals concurrently — one GetItem per user would
 	// be slow in serial for large user lists.
@@ -46,9 +50,10 @@ func (h *Handler) handleListUsers(ctx context.Context, args map[string]any) (*to
 		go func(i int) {
 			defer wg.Done()
 			u := &users[i]
-			transferUsed, err := h.db.GetTransferUsed(ctx, u.UserID, month)
+			transferUsedBefore, err := h.db.GetTransferUsed(ctx, u.UserID, month)
 			if err != nil {
-				log.Printf("admin: list users: get transfer for %s: %v", u.UserID, err)
+				errc <- fmt.Errorf("get transfer for %s: %w", u.UserID, err)
+				return
 			}
 			storageCap := h.effectiveStorageCap(u)
 			transferCap := h.effectiveTransferCap(u)
@@ -59,8 +64,8 @@ func (h *Handler) handleListUsers(ctx context.Context, args map[string]any) (*to
 				storagePct = min(100, max(1, int(float64(u.StorageUsedBytes)*100/float64(storageCap))))
 			}
 			transferPct := 0
-			if transferCap > 0 && transferUsed > 0 {
-				transferPct = min(100, max(1, int(float64(transferUsed)*100/float64(transferCap))))
+			if transferCap > 0 && transferUsedBefore > 0 {
+				transferPct = min(100, max(1, int(float64(transferUsedBefore)*100/float64(transferCap))))
 			}
 			out[i] = userWithUsage{
 				User:            *u,
@@ -70,6 +75,11 @@ func (h *Handler) handleListUsers(ctx context.Context, args map[string]any) (*to
 		}(i)
 	}
 	wg.Wait()
+	close(errc)
+	for err := range errc {
+		log.Printf("admin: list users: %v", err)
+		return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
+	}
 	return jsonResult(out)
 }
 
@@ -79,8 +89,15 @@ func (h *Handler) handleUpdateUser(ctx context.Context, caller *models.User, arg
 		return nil, &rpcError{Code: codeInvalidParams, Message: err.Error()}
 	}
 
-	// status is optional — omit when only updating caps.
+	// Validate that at least one field is being changed before touching the DB.
 	statusStr := strArgOpt(args, "status")
+	_, hasStorage := int64ArgOpt(args, "storage_cap_bytes")
+	_, hasTransfer := int64ArgOpt(args, "transfer_cap_bytes")
+	if statusStr == "" && !hasStorage && !hasTransfer {
+		return nil, &rpcError{Code: codeInvalidParams, Message: "at least one of status, storage_cap_bytes, or transfer_cap_bytes must be provided"}
+	}
+
+	// status is optional — omit when only updating caps.
 	if statusStr != "" {
 		status := models.UserStatus(statusStr)
 		switch status {
@@ -104,9 +121,7 @@ func (h *Handler) handleUpdateUser(ctx context.Context, caller *models.User, arg
 
 	// Optional cap overrides. Each field is independent: omit to leave unchanged,
 	// pass -1 to clear the per-user override and restore the server default.
-	anyCap := false
-	if storageCap, hasStorage := int64ArgOpt(args, "storage_cap_bytes"); hasStorage {
-		anyCap = true
+	if storageCap, ok := int64ArgOpt(args, "storage_cap_bytes"); ok {
 		var capPtr *int64
 		if storageCap >= 0 {
 			capPtr = &storageCap
@@ -119,8 +134,7 @@ func (h *Handler) handleUpdateUser(ctx context.Context, caller *models.User, arg
 			return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
 		}
 	}
-	if transferCap, hasTransfer := int64ArgOpt(args, "transfer_cap_bytes"); hasTransfer {
-		anyCap = true
+	if transferCap, ok := int64ArgOpt(args, "transfer_cap_bytes"); ok {
 		var capPtr *int64
 		if transferCap >= 0 {
 			capPtr = &transferCap
@@ -132,10 +146,6 @@ func (h *Handler) handleUpdateUser(ctx context.Context, caller *models.User, arg
 			log.Printf("admin: update transfer cap for %s: %v", userID, err)
 			return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
 		}
-	}
-
-	if statusStr == "" && !anyCap {
-		return nil, &rpcError{Code: codeInvalidParams, Message: "at least one of status, storage_cap_bytes, or transfer_cap_bytes must be provided"}
 	}
 
 	return textResult("user updated")
