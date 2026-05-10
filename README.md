@@ -79,7 +79,7 @@ All other services are effectively free at personal-use scale. The AWS Free Tier
 
 - AWS account with permissions to create Lambda, DynamoDB, S3, CloudFront, SSM, IAM, and (optionally) Route53 resources
 - Terraform ≥ 1.0
-- Go ≥ 1.26 (see `go.mod`; for local builds only — CI builds in GitHub Actions)
+- Go ≥ 1.26 (see `go.mod`; this is a release candidate toolchain — download from [go.dev/dl](https://go.dev/dl); for local builds only, CI builds in GitHub Actions)
 - GitHub repository (for OIDC-based CI/CD)
 - A Google account (for OAuth)
 
@@ -160,11 +160,11 @@ In your GitHub repository, go to **Settings → Secrets and variables → Action
 | `GOOGLE_CLIENT_SECRET` | OAuth client secret | Step 1 |
 | `ADMIN_GOOGLE_IDS` | Comma-separated Google subject IDs | Step 3 |
 | `TOKEN_SECRET` | Random string ≥ 32 bytes | `openssl rand -base64 32` |
-| `REDIRECT_URL` | Full OAuth callback URL | `https://<cloudfront-domain>/auth/callback` |
+| `REDIRECT_URL` | Full OAuth callback URL | `https://<cloudfront-domain>/auth/callback` (uppercase for GitHub Secrets; Terraform uses the lowercase `redirect_url` var name) |
 
 \* `AWS_DEPLOY_ROLE_ARN` is a chicken-and-egg: the IAM role is created by Terraform, but Terraform needs the role to run in CI. **First deploy:** run Terraform locally (see Step 5), then add the role ARN as a secret so subsequent deploys run via CI.
 
-`TF_STATE_BUCKET` is only the bucket name — the lock table name is derived automatically by appending `-lock`. You don't need a separate secret for it.
+`TF_STATE_BUCKET` is only the bucket name — the lock table name is derived by appending `-lock` in the deploy workflow's `terraform init` `-backend-config` flags. You don't need a separate secret for it.
 
 **Generating TOKEN_SECRET:**
 ```bash
@@ -227,7 +227,7 @@ After apply, note the outputs:
 
 ```bash
 terraform output cloudfront_url   # e.g. https://d1234abcd.cloudfront.net
-terraform output deploy_role_arn  # e.g. arn:aws:iam::123456789:role/notoriousmcp-deploy
+terraform output deploy_role_arn  # e.g. arn:aws:iam::123456789012:role/notoriousmcp-deploy
 ```
 
 Then:
@@ -321,7 +321,7 @@ Add to your MCP client config (e.g. Claude Code's `.claude/settings.json`):
 
 To get a token:
 1. Visit `https://<your-cloudfront-domain>/auth/login` in a browser
-2. Complete the Google OAuth flow — you'll be redirected back to your redirect URI with `?code=<exchange-code>` appended to the URL. Copy that value.
+2. Complete the Google OAuth flow — you'll be redirected to your redirect URI with `?code=<exchange-code>` appended. In local dev the server isn't listening on the redirect URI, so the browser will show a connection error — that's expected. The code is in the URL bar. Copy it. In production the server handles the redirect automatically and you won't see this step.
 3. POST the exchange code to get a Bearer token. The `redirect_uri` must exactly match the one registered in Google Cloud Console (same as your `REDIRECT_URL` secret):
    ```bash
    curl -X POST https://<your-cloudfront-domain>/auth/token \
