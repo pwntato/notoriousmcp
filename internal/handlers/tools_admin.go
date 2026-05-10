@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"sync"
 
 	"github.com/pwntato/notoriousmcp/internal/db"
 	"github.com/pwntato/notoriousmcp/internal/models"
@@ -34,31 +35,41 @@ func (h *Handler) handleListUsers(ctx context.Context, args map[string]any) (*to
 	}
 
 	month := currentMonth()
-	out := make([]userWithUsage, 0, len(users))
-	// TODO: replace with BatchGetItem if user count grows large.
-	for _, u := range users {
-		transferUsed, err := h.db.GetTransferUsed(ctx, u.UserID, month)
-		if err != nil {
-			log.Printf("admin: list users: get transfer for %s: %v", u.UserID, err)
-		}
-		storageCap := h.effectiveStorageCap(&u)
-		transferCap := h.effectiveTransferCap(&u)
-		storagePct := 0
-		if storageCap > 0 && u.StorageUsedBytes > 0 {
-			// Round up to 1 so any non-zero usage shows as at least 1% rather
-			// than silently appearing as 0 for small values.
-			storagePct = max(1, int(float64(u.StorageUsedBytes)*100/float64(storageCap)))
-		}
-		transferPct := 0
-		if transferCap > 0 && transferUsed > 0 {
-			transferPct = max(1, int(float64(transferUsed)*100/float64(transferCap)))
-		}
-		out = append(out, userWithUsage{
-			User:            u,
-			StorageUsedPct:  storagePct,
-			TransferUsedPct: transferPct,
-		})
+	out := make([]userWithUsage, len(users))
+
+	// Fetch per-user transfer totals concurrently — one GetItem per user would
+	// be slow in serial for large user lists.
+	// TODO: replace with BatchGetItem once user counts grow enough to matter.
+	var wg sync.WaitGroup
+	for i := range users {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			u := &users[i]
+			transferUsed, err := h.db.GetTransferUsed(ctx, u.UserID, month)
+			if err != nil {
+				log.Printf("admin: list users: get transfer for %s: %v", u.UserID, err)
+			}
+			storageCap := h.effectiveStorageCap(u)
+			transferCap := h.effectiveTransferCap(u)
+			storagePct := 0
+			if storageCap > 0 && u.StorageUsedBytes > 0 {
+				// Round up to 1 so any non-zero usage shows as at least 1%.
+				// Capped at 100 — over-quota is already blocked at write time.
+				storagePct = min(100, max(1, int(float64(u.StorageUsedBytes)*100/float64(storageCap))))
+			}
+			transferPct := 0
+			if transferCap > 0 && transferUsed > 0 {
+				transferPct = min(100, max(1, int(float64(transferUsed)*100/float64(transferCap))))
+			}
+			out[i] = userWithUsage{
+				User:            *u,
+				StorageUsedPct:  storagePct,
+				TransferUsedPct: transferPct,
+			}
+		}(i)
 	}
+	wg.Wait()
 	return jsonResult(out)
 }
 

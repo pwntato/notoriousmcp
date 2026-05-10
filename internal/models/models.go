@@ -11,6 +11,11 @@ const (
 	StatusBanned  UserStatus = "banned"
 )
 
+// User is the user profile model. The storage/cap fields are included in JSON
+// because User is only serialized in the admin-only list_users response (via
+// userWithUsage). No public endpoint serializes User directly — check_status
+// returns plain text, and auth middleware only injects User into context.
+// If User is ever serialized in a non-admin context, revisit which fields to expose.
 type User struct {
 	UserID           string     `json:"user_id"             dynamodbav:"UserID"`
 	Email            string     `json:"email"               dynamodbav:"Email"`

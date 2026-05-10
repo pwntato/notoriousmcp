@@ -185,8 +185,10 @@ func (h *Handler) handleSaveNote(ctx context.Context, user *models.User, args ma
 		log.Printf("mcp: save note %s: cleanup old s3 key %s: %v", noteID, existing.S3Key, err)
 	}
 
-	if err := h.db.AddStorageUsed(ctx, user.UserID, delta); err != nil {
-		log.Printf("mcp: save note %s: update storage used: %v", noteID, err)
+	if delta != 0 {
+		if err := h.db.AddStorageUsed(ctx, user.UserID, delta); err != nil {
+			log.Printf("mcp: save note %s: update storage used: %v", noteID, err)
+		}
 	}
 
 	return jsonResult(note)
@@ -219,8 +221,10 @@ func (h *Handler) handleDeleteNote(ctx context.Context, user *models.User, args 
 		return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
 	}
 
-	if err := h.db.AddStorageUsed(ctx, user.UserID, -note.Size); err != nil {
-		log.Printf("mcp: delete note %s: update storage used: %v", noteID, err)
+	if note.Size > 0 {
+		if err := h.db.AddStorageUsed(ctx, user.UserID, -note.Size); err != nil {
+			log.Printf("mcp: delete note %s: update storage used: %v", noteID, err)
+		}
 	}
 
 	return textResult("note deleted")

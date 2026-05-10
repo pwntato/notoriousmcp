@@ -946,7 +946,7 @@ func TestIntegrationUsageVisibleInListUsers(t *testing.T) {
 	user := saveIntegrationUser(t, dbClient, models.StatusUser)
 	h := newIntegrationHandler(t, dbClient, storeClient)
 
-	// Save a note to accumulate some storage usage.
+	// Save a note to accumulate storage usage.
 	resp := doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
 		"name": "save_note",
 		"arguments": map[string]any{
@@ -965,7 +965,16 @@ func TestIntegrationUsageVisibleInListUsers(t *testing.T) {
 		})
 	})
 
-	// Admin lists users — find our user and check usage fields are present.
+	// Fetch the note to accumulate transfer usage.
+	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name":      "get_note",
+		"arguments": map[string]any{"note_id": noteID},
+	})
+	if resp.Error != nil {
+		t.Fatalf("get_note: %+v", resp.Error)
+	}
+
+	// Admin lists users — find our user and verify both usage percentages are > 0.
 	resp = doIntegrationRequest(t, h, admin.UserID, "tools/call", map[string]any{
 		"name":      "list_users",
 		"arguments": map[string]any{},
@@ -990,9 +999,11 @@ func TestIntegrationUsageVisibleInListUsers(t *testing.T) {
 			if _, ok := u["transfer_used_pct"]; !ok {
 				t.Error("transfer_used_pct missing from list_users response")
 			}
-			// Storage should be > 0 after saving a note.
 			if pct, ok := u["storage_used_pct"].(float64); !ok || pct <= 0 {
 				t.Errorf("storage_used_pct: want > 0 after save, got %v", u["storage_used_pct"])
+			}
+			if pct, ok := u["transfer_used_pct"].(float64); !ok || pct <= 0 {
+				t.Errorf("transfer_used_pct: want > 0 after get_note, got %v", u["transfer_used_pct"])
 			}
 		}
 	}
@@ -1074,6 +1085,87 @@ func TestIntegrationPerUserCapOverride(t *testing.T) {
 			"arguments": map[string]any{"note_id": noteID},
 		})
 	})
+}
+
+func TestIntegrationPerUserTransferCapOverride(t *testing.T) {
+	dbClient, storeClient := newTestClients(t)
+	admin := saveIntegrationUser(t, dbClient, models.StatusAdmin)
+	user := saveIntegrationUser(t, dbClient, models.StatusUser)
+	h := newIntegrationHandler(t, dbClient, storeClient)
+
+	// Create a note first (no cap concerns on write).
+	resp := doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name": "save_note",
+		"arguments": map[string]any{
+			"title":   "Transfer Cap Override Test",
+			"content": "this is more than one byte of content",
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("save_note: %+v", resp.Error)
+	}
+	noteID := extractField(t, resp.Result, "id")
+	t.Cleanup(func() {
+		doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+			"name":      "delete_note",
+			"arguments": map[string]any{"note_id": noteID},
+		})
+	})
+
+	// Set a 1-byte transfer cap via update_user (no status change).
+	resp = doIntegrationRequest(t, h, admin.UserID, "tools/call", map[string]any{
+		"name": "update_user",
+		"arguments": map[string]any{
+			"user_id":            user.UserID,
+			"transfer_cap_bytes": float64(1),
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("update_user (set transfer cap): %+v", resp.Error)
+	}
+
+	// get_note must be blocked by the tiny per-user transfer cap.
+	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name":      "get_note",
+		"arguments": map[string]any{"note_id": noteID},
+	})
+	if resp.Error != nil {
+		t.Fatalf("unexpected RPC error: %+v", resp.Error)
+	}
+	var result struct{ IsError bool }
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !result.IsError {
+		t.Error("expected isError=true when per-user transfer cap exceeded")
+	}
+
+	// Clear the cap; get_note should now succeed.
+	resp = doIntegrationRequest(t, h, admin.UserID, "tools/call", map[string]any{
+		"name": "update_user",
+		"arguments": map[string]any{
+			"user_id":            user.UserID,
+			"transfer_cap_bytes": float64(-1),
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("update_user (clear transfer cap): %+v", resp.Error)
+	}
+
+	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name":      "get_note",
+		"arguments": map[string]any{"note_id": noteID},
+	})
+	if resp.Error != nil {
+		t.Fatalf("get_note after cap cleared: %+v", resp.Error)
+	}
+	var result2 struct{ IsError bool }
+	if err := json.Unmarshal(resp.Result, &result2); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if result2.IsError {
+		t.Errorf("expected success after cap cleared, got: %s", firstContentText(t, resp.Result))
+	}
 }
 
 // ---- test helpers ----

@@ -191,8 +191,10 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 		log.Printf("mcp: save file %s: cleanup old s3 key %s: %v", filePath, existing.S3Key, err)
 	}
 
-	if err := h.db.AddStorageUsed(ctx, user.UserID, delta); err != nil {
-		log.Printf("mcp: save file %s: update storage used: %v", filePath, err)
+	if delta != 0 {
+		if err := h.db.AddStorageUsed(ctx, user.UserID, delta); err != nil {
+			log.Printf("mcp: save file %s: update storage used: %v", filePath, err)
+		}
 	}
 
 	return jsonResult(f)
@@ -225,8 +227,10 @@ func (h *Handler) handleDeleteFile(ctx context.Context, user *models.User, args 
 		return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
 	}
 
-	if err := h.db.AddStorageUsed(ctx, user.UserID, -f.Size); err != nil {
-		log.Printf("mcp: delete file %s: update storage used: %v", filePath, err)
+	if f.Size > 0 {
+		if err := h.db.AddStorageUsed(ctx, user.UserID, -f.Size); err != nil {
+			log.Printf("mcp: delete file %s: update storage used: %v", filePath, err)
+		}
 	}
 
 	return textResult("file deleted")
