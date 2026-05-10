@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
@@ -24,6 +25,12 @@ func testMiddlewareCfg() auth.Config {
 		RedirectURL:  "https://example.com/auth/callback",
 		TokenSecret:  testSecret,
 	}
+}
+
+func testMiddlewareCfgWithGoogleURL(googleTokenURL string) auth.Config {
+	cfg := testMiddlewareCfg()
+	cfg.GoogleTokenURL = googleTokenURL
+	return cfg
 }
 
 // okHandler is a sentinel next handler that writes 200 and echoes the user ID
@@ -133,6 +140,29 @@ func TestUserFromContextNil(t *testing.T) {
 	if u != nil {
 		t.Errorf("empty context: expected nil user, got %+v", u)
 	}
+}
+
+// fakeGoogleTokenServer starts an httptest server that simulates Google's token
+// endpoint. When accept is true it returns a well-formed token response;
+// otherwise it returns 400 with an "invalid_grant" error body (revoked token).
+// The caller must call server.Close() when done.
+func fakeGoogleTokenServer(t *testing.T, accept bool) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !accept {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant"})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "google-access-token",
+			"token_type":    "Bearer",
+			"expires_in":    3600,
+			"refresh_token": "google-refresh-token",
+		})
+	}))
 }
 
 // ---- integration tests (require DYNAMODB_ENDPOINT) ----
@@ -323,7 +353,10 @@ func TestMiddlewareExpiredTokenRefreshSuccess(t *testing.T) {
 		t.Fatalf("issue expired: %v", err)
 	}
 
-	h := auth.Middleware(testMiddlewareCfg(), dbClient, http.HandlerFunc(okHandler))
+	googleSrv := fakeGoogleTokenServer(t, true)
+	defer googleSrv.Close()
+
+	h := auth.Middleware(testMiddlewareCfgWithGoogleURL(googleSrv.URL), dbClient, http.HandlerFunc(okHandler))
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("Authorization", "Bearer "+expired)
 	w := httptest.NewRecorder()
@@ -368,11 +401,14 @@ func TestMiddlewareXNewTokenAbsentOnNextError(t *testing.T) {
 		t.Fatalf("issue expired: %v", err)
 	}
 
+	googleSrv := fakeGoogleTokenServer(t, true)
+	defer googleSrv.Close()
+
 	errorHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 	})
 
-	h := auth.Middleware(testMiddlewareCfg(), dbClient, errorHandler)
+	h := auth.Middleware(testMiddlewareCfgWithGoogleURL(googleSrv.URL), dbClient, errorHandler)
 	req := httptest.NewRequest("GET", "/missing", nil)
 	req.Header.Set("Authorization", "Bearer "+expired)
 	w := httptest.NewRecorder()
@@ -423,7 +459,10 @@ func TestMiddlewareExpiredTokenRefreshBannedUser(t *testing.T) {
 		t.Fatalf("issue expired: %v", err)
 	}
 
-	h := auth.Middleware(testMiddlewareCfg(), dbClient, http.HandlerFunc(okHandler))
+	googleSrv := fakeGoogleTokenServer(t, true)
+	defer googleSrv.Close()
+
+	h := auth.Middleware(testMiddlewareCfgWithGoogleURL(googleSrv.URL), dbClient, http.HandlerFunc(okHandler))
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("Authorization", "Bearer "+expired)
 	w := httptest.NewRecorder()
@@ -434,5 +473,44 @@ func TestMiddlewareExpiredTokenRefreshBannedUser(t *testing.T) {
 	}
 	if got := w.Header().Get("X-New-Token"); got != "" {
 		t.Errorf("X-New-Token must not be set on 403 response, got %q", got)
+	}
+}
+
+func TestMiddlewareExpiredTokenRevokedRefreshToken(t *testing.T) {
+	// When Google rejects the stored refresh token (revoked), the middleware must
+	// return 401 and delete the token from DynamoDB so future attempts fail fast.
+	dbClient := newTestDBClient(t)
+	userID := randUID()
+	saveTestUser(t, dbClient, userID, models.StatusUser)
+	if err := dbClient.SaveRefreshToken(context.Background(), userID, "revoked-google-token"); err != nil {
+		t.Fatalf("save refresh token: %v", err)
+	}
+
+	expired, err := auth.IssueExpiredToken(testSecret, userID)
+	if err != nil {
+		t.Fatalf("issue expired: %v", err)
+	}
+
+	googleSrv := fakeGoogleTokenServer(t, false) // Google returns 400 invalid_grant
+	defer googleSrv.Close()
+
+	h := auth.Middleware(testMiddlewareCfgWithGoogleURL(googleSrv.URL), dbClient, http.HandlerFunc(okHandler))
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Authorization", "Bearer "+expired)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("revoked token: got %d want 401", w.Code)
+	}
+	if got := w.Header().Get("X-New-Token"); got != "" {
+		t.Errorf("X-New-Token must not be set on revoked refresh, got %q", got)
+	}
+
+	// Confirm the stored token was deleted — a second request must also fail with
+	// ErrNoRefreshToken rather than hitting Google again.
+	_, loadErr := dbClient.LoadRefreshToken(context.Background(), userID)
+	if loadErr == nil {
+		t.Error("revoked token should have been deleted from DynamoDB")
 	}
 }

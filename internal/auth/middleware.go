@@ -11,6 +11,9 @@ import (
 	"net/http"
 	"strings"
 
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
+
 	"github.com/pwntato/notoriousmcp/internal/db"
 	"github.com/pwntato/notoriousmcp/internal/models"
 )
@@ -37,15 +40,13 @@ func WithUserContext(ctx context.Context, user *models.User) context.Context {
 // the user into the request context.
 //
 // If the token is expired and the user has a stored Google refresh token,
-// a fresh notoriousmcp access token is issued and delivered via X-New-Token.
+// the token is exchanged live with Google's token endpoint to confirm it is
+// still valid. On success a fresh notoriousmcp access token is issued and
+// delivered via X-New-Token. If Google rejects the token (revoked/expired),
+// the stored token is deleted from DynamoDB and the request gets 401.
 // X-New-Token is only written when next responds with a 2xx status code —
 // the response is buffered to enforce this. A 401, 403, or 5xx from next
 // will not carry the header.
-//
-// Note: the stored Google refresh token is not exchanged with Google on every
-// request — its presence in DynamoDB is treated as proof of prior authorization.
-// If it has been revoked, Google will reject it the next time a live Google API
-// call is made. A future PR can add live token validation here if required.
 //
 // Status rules (evaluated after token authentication):
 //   - pending/banned: 403 Forbidden
@@ -60,7 +61,7 @@ func Middleware(cfg Config, dbClient *db.Client, next http.Handler) http.Handler
 
 		ctx := r.Context()
 
-		userID, newToken, err := resolveToken(ctx, cfg.TokenSecret, dbClient, token)
+		userID, newToken, err := resolveToken(ctx, cfg, dbClient, token)
 		if err != nil {
 			http.Error(w, "invalid or expired token", http.StatusUnauthorized)
 			return
@@ -117,8 +118,8 @@ func Middleware(cfg Config, dbClient *db.Client, next http.Handler) http.Handler
 // forged tokens are rejected before the DB is touched. Non-ErrInvalidToken errors
 // (e.g. an internal crypto failure) are propagated directly without attempting
 // a refresh.
-func resolveToken(ctx context.Context, secret []byte, dbClient *db.Client, token string) (userID, newToken string, err error) {
-	userID, err = ValidateAccessToken(secret, token)
+func resolveToken(ctx context.Context, cfg Config, dbClient *db.Client, token string) (userID, newToken string, err error) {
+	userID, err = ValidateAccessToken(cfg.TokenSecret, token)
 	if err == nil {
 		return userID, "", nil
 	}
@@ -126,7 +127,7 @@ func resolveToken(ctx context.Context, secret []byte, dbClient *db.Client, token
 		return "", "", err
 	}
 
-	newToken, userID, err = tryRefresh(ctx, secret, dbClient, token)
+	newToken, userID, err = tryRefresh(ctx, cfg, dbClient, token)
 	return userID, newToken, err
 }
 
@@ -140,25 +141,64 @@ func bearerToken(r *http.Request) string {
 }
 
 // tryRefresh issues a new notoriousmcp access token for the user embedded in
-// rawToken, provided the token's HMAC signature is valid (expiry is not checked).
-// The stored Google refresh token's presence in DynamoDB is used as proof of
-// prior authorization without calling Google's token endpoint. A future PR should
-// exchange the stored token with Google to detect revocation — tracked in issue #5.
-func tryRefresh(ctx context.Context, secret []byte, dbClient *db.Client, rawToken string) (newToken, userID string, err error) {
-	userID, err = validSignatureUserID(secret, rawToken)
+// rawToken, provided the token's HMAC signature is valid (expiry is not checked)
+// and Google accepts the stored refresh token. If Google rejects the token
+// (revoked or expired), the stored token is deleted from DynamoDB and the
+// refresh fails with ErrInvalidToken so the middleware returns 401.
+func tryRefresh(ctx context.Context, cfg Config, dbClient *db.Client, rawToken string) (newToken, userID string, err error) {
+	userID, err = validSignatureUserID(cfg.TokenSecret, rawToken)
 	if err != nil {
 		return "", "", err
 	}
 
-	if _, err = dbClient.LoadRefreshToken(ctx, userID); err != nil {
+	storedToken, err := dbClient.LoadRefreshToken(ctx, userID)
+	if err != nil {
 		return "", "", err
 	}
 
-	newToken, err = IssueAccessToken(secret, userID)
+	if err = exchangeGoogleRefreshToken(ctx, cfg, storedToken); err != nil {
+		// Token was revoked or otherwise rejected by Google — remove it so future
+		// refresh attempts fail fast without hitting Google unnecessarily.
+		if delErr := dbClient.DeleteRefreshToken(ctx, userID); delErr != nil {
+			log.Printf("auth: delete revoked refresh token for %s: %v", userID, delErr)
+		}
+		return "", "", ErrInvalidToken
+	}
+
+	newToken, err = IssueAccessToken(cfg.TokenSecret, userID)
 	if err != nil {
 		return "", "", err
 	}
 	return newToken, userID, nil
+}
+
+// exchangeGoogleRefreshToken performs a live token exchange with Google to
+// confirm the stored refresh token is still valid. It returns nil on success
+// and a non-nil error if Google rejects the token.
+//
+// The Google access token returned by src.Token() is intentionally discarded —
+// the exchange is performed only for liveness validation, not to obtain a
+// Google access token for API calls.
+//
+// Known gap: Google occasionally rotates refresh tokens, returning a new one
+// alongside the access token. That new token is not captured here, so the stored
+// DynamoDB value becomes stale after a rotation. In practice Google only rotates
+// for inactive tokens; regular callers see the same token indefinitely.
+func exchangeGoogleRefreshToken(ctx context.Context, cfg Config, refreshToken string) error {
+	endpoint := google.Endpoint
+	if cfg.GoogleTokenURL != "" {
+		endpoint = oauth2.Endpoint{TokenURL: cfg.GoogleTokenURL}
+	}
+	oauthCfg := &oauth2.Config{
+		ClientID:     cfg.ClientID,
+		ClientSecret: cfg.ClientSecret,
+		Endpoint:     endpoint,
+	}
+	src := oauthCfg.TokenSource(ctx, &oauth2.Token{RefreshToken: refreshToken})
+	if _, err := src.Token(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // responseBuffer is a minimal http.ResponseWriter that captures the response

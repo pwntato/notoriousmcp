@@ -128,6 +128,29 @@ func (c *Client) LoadRefreshToken(ctx context.Context, userID string) (string, e
 	return v.Value, nil
 }
 
+// DeleteRefreshToken removes the stored Google refresh token for a user.
+// It is a no-op if the user has no stored token. Returns ErrNotFound if the
+// user record does not exist.
+func (c *Client) DeleteRefreshToken(ctx context.Context, userID string) error {
+	_, err := c.ddb.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: aws.String(c.tableName),
+		Key: map[string]types.AttributeValue{
+			"PK": &types.AttributeValueMemberS{Value: pk(userID)},
+			"SK": &types.AttributeValueMemberS{Value: profileSK()},
+		},
+		UpdateExpression:    aws.String("REMOVE RefreshToken"),
+		ConditionExpression: aws.String("attribute_exists(PK)"),
+	})
+	if err != nil {
+		var cfe *types.ConditionalCheckFailedException
+		if errors.As(err, &cfe) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("delete refresh token: %w", err)
+	}
+	return nil
+}
+
 // UpdateUserStatus sets a user's status field only.
 func (c *Client) UpdateUserStatus(ctx context.Context, userID string, status models.UserStatus) error {
 	_, err := c.ddb.UpdateItem(ctx, &dynamodb.UpdateItemInput{
