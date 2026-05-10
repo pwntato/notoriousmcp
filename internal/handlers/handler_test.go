@@ -43,7 +43,7 @@ type rpcResp struct {
 // auth.WithUserContext, bypassing auth.Middleware entirely. Safe for tests
 // that don't need DB or S3.
 func newUnitHandler(user *models.User) http.Handler {
-	h := handlers.New(nil, nil)
+	h := handlers.New(nil, nil, handlers.Config{})
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -496,7 +496,7 @@ func saveIntegrationUser(t *testing.T, dbClient *db.Client, status models.UserSt
 // real Bearer tokens are validated against DynamoDB.
 func newIntegrationHandler(t *testing.T, dbClient *db.Client, storeClient *store.Client) http.Handler {
 	t.Helper()
-	h := handlers.New(dbClient, storeClient)
+	h := handlers.New(dbClient, storeClient, handlers.Config{})
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 	cfg := auth.Config{
@@ -842,6 +842,162 @@ func TestIntegrationUserCannotCallAdminTool(t *testing.T) {
 	}
 	if resp.Error.Code != -32601 {
 		t.Errorf("code: got %d want -32601", resp.Error.Code)
+	}
+}
+
+func newIntegrationHandlerWithConfig(t *testing.T, dbClient *db.Client, storeClient *store.Client, cfg handlers.Config) http.Handler {
+	t.Helper()
+	h := handlers.New(dbClient, storeClient, cfg)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+	authCfg := auth.Config{
+		ClientID:     "x",
+		ClientSecret: "x",
+		RedirectURL:  "https://example.com/auth/callback",
+		TokenSecret:  testSecret,
+	}
+	return auth.Middleware(authCfg, dbClient, mux)
+}
+
+func TestIntegrationStorageCapEnforced(t *testing.T) {
+	dbClient, storeClient := newTestClients(t)
+	user := saveIntegrationUser(t, dbClient, models.StatusUser)
+	// Cap is 10 bytes — any real content will exceed it.
+	h := newIntegrationHandlerWithConfig(t, dbClient, storeClient, handlers.Config{
+		DefaultStorageCap:  10,
+		DefaultTransferCap: handlers.DefaultTransferCapBytes,
+	})
+
+	resp := doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name": "save_note",
+		"arguments": map[string]any{
+			"title":   "Cap Test",
+			"content": "this content is definitely more than 10 bytes",
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("unexpected RPC error: %+v", resp.Error)
+	}
+	var result struct {
+		IsError bool `json:"isError"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !result.IsError {
+		t.Error("expected isError=true when storage cap exceeded")
+	}
+	text := firstContentText(t, resp.Result)
+	if text == "" {
+		t.Error("expected error message in content")
+	}
+}
+
+func TestIntegrationTransferCapEnforced(t *testing.T) {
+	dbClient, storeClient := newTestClients(t)
+	user := saveIntegrationUser(t, dbClient, models.StatusUser)
+	// Transfer cap is 1 byte — any real get response will exceed it.
+	h := newIntegrationHandlerWithConfig(t, dbClient, storeClient, handlers.Config{
+		DefaultStorageCap:  handlers.DefaultStorageCapBytes,
+		DefaultTransferCap: 1,
+	})
+
+	// Create a note (doesn't hit transfer cap).
+	resp := doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name": "save_note",
+		"arguments": map[string]any{
+			"title":   "Transfer Cap Test",
+			"content": "hello",
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("save_note: %+v", resp.Error)
+	}
+	noteID := extractField(t, resp.Result, "id")
+	t.Cleanup(func() {
+		doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+			"name":      "delete_note",
+			"arguments": map[string]any{"note_id": noteID},
+		})
+	})
+
+	// get_note must be blocked by the transfer cap.
+	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name":      "get_note",
+		"arguments": map[string]any{"note_id": noteID},
+	})
+	if resp.Error != nil {
+		t.Fatalf("unexpected RPC error: %+v", resp.Error)
+	}
+	var result struct {
+		IsError bool `json:"isError"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !result.IsError {
+		t.Error("expected isError=true when transfer cap exceeded")
+	}
+}
+
+func TestIntegrationUsageVisibleInListUsers(t *testing.T) {
+	dbClient, storeClient := newTestClients(t)
+	admin := saveIntegrationUser(t, dbClient, models.StatusAdmin)
+	user := saveIntegrationUser(t, dbClient, models.StatusUser)
+	h := newIntegrationHandler(t, dbClient, storeClient)
+
+	// Save a note to accumulate some storage usage.
+	resp := doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name": "save_note",
+		"arguments": map[string]any{
+			"title":   "Usage Test",
+			"content": "some content for storage tracking",
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("save_note: %+v", resp.Error)
+	}
+	noteID := extractField(t, resp.Result, "id")
+	t.Cleanup(func() {
+		doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+			"name":      "delete_note",
+			"arguments": map[string]any{"note_id": noteID},
+		})
+	})
+
+	// Admin lists users — find our user and check usage fields are present.
+	resp = doIntegrationRequest(t, h, admin.UserID, "tools/call", map[string]any{
+		"name":      "list_users",
+		"arguments": map[string]any{},
+	})
+	if resp.Error != nil {
+		t.Fatalf("list_users: %+v", resp.Error)
+	}
+
+	text := firstContentText(t, resp.Result)
+	var users []map[string]any
+	if err := json.Unmarshal([]byte(text), &users); err != nil {
+		t.Fatalf("unmarshal users: %v", err)
+	}
+
+	found := false
+	for _, u := range users {
+		if u["user_id"] == user.UserID {
+			found = true
+			if _, ok := u["storage_used_pct"]; !ok {
+				t.Error("storage_used_pct missing from list_users response")
+			}
+			if _, ok := u["transfer_used_pct"]; !ok {
+				t.Error("transfer_used_pct missing from list_users response")
+			}
+			// Storage should be > 0 after saving a note.
+			if pct, ok := u["storage_used_pct"].(float64); !ok || pct < 0 {
+				t.Errorf("storage_used_pct: unexpected value %v", u["storage_used_pct"])
+			}
+		}
+	}
+	if !found {
+		t.Errorf("user %s not found in list_users response", user.UserID)
 	}
 }
 

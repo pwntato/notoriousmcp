@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -71,7 +72,10 @@ func init() {
 	}
 
 	authHandler := auth.New(authCfg, dbClient)
-	mcpHandler := handlers.New(dbClient, storeClient)
+	mcpHandler := handlers.New(dbClient, storeClient, handlers.Config{
+		DefaultStorageCap:  int64EnvOrDefault("DEFAULT_STORAGE_CAP_BYTES", handlers.DefaultStorageCapBytes),
+		DefaultTransferCap: int64EnvOrDefault("DEFAULT_TRANSFER_CAP_BYTES", handlers.DefaultTransferCapBytes),
+	})
 
 	mux := http.NewServeMux()
 	authHandler.RegisterRoutes(mux)
@@ -168,6 +172,19 @@ func mustEnv(key string) string {
 		log.Fatalf("required env var %s is not set", key)
 	}
 	return v
+}
+
+func int64EnvOrDefault(key string, def int64) int64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		log.Printf("warning: %s=%q is not a valid int64, using default %d", key, v, def)
+		return def
+	}
+	return n
 }
 
 func filterEmpty(ss []string) []string {

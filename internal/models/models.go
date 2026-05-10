@@ -12,12 +12,15 @@ const (
 )
 
 type User struct {
-	UserID       string     `json:"user_id"    dynamodbav:"UserID"`
-	Email        string     `json:"email"      dynamodbav:"Email"`
-	Name         string     `json:"name"       dynamodbav:"Name"`
-	Status       UserStatus `json:"status"     dynamodbav:"Status"`
-	RefreshToken string     `json:"-"          dynamodbav:"-"`
-	CreatedAt    time.Time  `json:"created_at" dynamodbav:"CreatedAt"`
+	UserID           string     `json:"user_id"             dynamodbav:"UserID"`
+	Email            string     `json:"email"               dynamodbav:"Email"`
+	Name             string     `json:"name"                dynamodbav:"Name"`
+	Status           UserStatus `json:"status"              dynamodbav:"Status"`
+	RefreshToken     string     `json:"-"                   dynamodbav:"-"`
+	CreatedAt        time.Time  `json:"created_at"          dynamodbav:"CreatedAt"`
+	StorageUsedBytes int64      `json:"storage_used_bytes"  dynamodbav:"StorageUsedBytes"`
+	StorageCapBytes  *int64     `json:"storage_cap_bytes"   dynamodbav:"StorageCapBytes,omitempty"`
+	TransferCapBytes *int64     `json:"transfer_cap_bytes"  dynamodbav:"TransferCapBytes,omitempty"`
 }
 
 type Note struct {
@@ -26,6 +29,7 @@ type Note struct {
 	Title      string    `json:"title"       dynamodbav:"Title"`
 	Tags       []string  `json:"tags"        dynamodbav:"Tags"`
 	S3Key      string    `json:"-"           dynamodbav:"S3Key"`
+	Size       int64     `json:"size"        dynamodbav:"Size"`
 	Version    int       `json:"version"     dynamodbav:"Version"`
 	CreatedAt  time.Time `json:"created_at"  dynamodbav:"CreatedAt"`
 	ModifiedAt time.Time `json:"modified_at" dynamodbav:"ModifiedAt"`

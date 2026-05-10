@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -22,16 +23,74 @@ const (
 	serverVersion      = "0.1.0"
 )
 
+const (
+	// DefaultStorageCapBytes is 1 GB — overridden by DEFAULT_STORAGE_CAP_BYTES env var.
+	DefaultStorageCapBytes int64 = 1 << 30
+	// DefaultTransferCapBytes is 1 GB/month — overridden by DEFAULT_TRANSFER_CAP_BYTES env var.
+	DefaultTransferCapBytes int64 = 1 << 30
+)
+
+// Config holds handler-level configuration (currently just default caps).
+type Config struct {
+	DefaultStorageCap  int64
+	DefaultTransferCap int64
+}
+
 // Handler is the MCP protocol handler.
 type Handler struct {
 	db    *db.Client
 	store *store.Client
+	cfg   Config
 }
 
 // New creates an MCP Handler. Passing nil for dbClient or storeClient is safe
 // only for unit tests that exercise code paths not reaching the DB or store.
-func New(dbClient *db.Client, storeClient *store.Client) *Handler {
-	return &Handler{db: dbClient, store: storeClient}
+func New(dbClient *db.Client, storeClient *store.Client, cfg Config) *Handler {
+	if cfg.DefaultStorageCap == 0 {
+		cfg.DefaultStorageCap = DefaultStorageCapBytes
+	}
+	if cfg.DefaultTransferCap == 0 {
+		cfg.DefaultTransferCap = DefaultTransferCapBytes
+	}
+	return &Handler{db: dbClient, store: storeClient, cfg: cfg}
+}
+
+// effectiveStorageCap returns the cap in bytes for a user, falling back to the default.
+func (h *Handler) effectiveStorageCap(u *models.User) int64 {
+	if u.StorageCapBytes != nil {
+		return *u.StorageCapBytes
+	}
+	return h.cfg.DefaultStorageCap
+}
+
+// effectiveTransferCap returns the monthly transfer cap in bytes, falling back to the default.
+func (h *Handler) effectiveTransferCap(u *models.User) int64 {
+	if u.TransferCapBytes != nil {
+		return *u.TransferCapBytes
+	}
+	return h.cfg.DefaultTransferCap
+}
+
+// currentMonth returns the current UTC month in YYYY-MM format for transfer records.
+func currentMonth() string {
+	return time.Now().UTC().Format("2006-01")
+}
+
+// transferTTL returns a Unix timestamp 60 days from now, used as TTL on transfer records.
+func transferTTL() int64 {
+	return time.Now().UTC().Add(60 * 24 * time.Hour).Unix()
+}
+
+// checkTransferCap reads the current month's transfer usage for the user and
+// returns it. Returns an rpcError if the DB read fails (not if over cap — the
+// caller decides whether to block based on the response size).
+func (h *Handler) checkTransferCap(ctx context.Context, user *models.User) (int64, *rpcError) {
+	used, err := h.db.GetTransferUsed(ctx, user.UserID, currentMonth())
+	if err != nil {
+		log.Printf("mcp: get transfer used for %s: %v", user.UserID, err)
+		return 0, &rpcError{Code: codeInternalError, Message: "internal error"}
+	}
+	return used, nil
 }
 
 // RegisterRoutes wires the MCP endpoint onto the given mux.
@@ -313,6 +372,25 @@ func newID() string {
 	return hex.EncodeToString(b)
 }
 
+// int64ArgOpt reads an optional numeric argument as int64, returning (0, false)
+// if absent. Returns (value, true) if present; caller should pass -1 to mean
+// "clear the cap" so that 0 is distinguishable from "not provided".
+func int64ArgOpt(args map[string]any, key string) (int64, bool) {
+	v, ok := args[key]
+	if !ok {
+		return 0, false
+	}
+	switch n := v.(type) {
+	case float64:
+		return int64(n), true
+	case int64:
+		return n, true
+	case int:
+		return int64(n), true
+	}
+	return 0, false
+}
+
 // versionArg reads the optional "version" argument as int.
 func versionArg(args map[string]any) int {
 	v, ok := args["version"]
@@ -335,6 +413,12 @@ func dbErrResult(err error) (*toolsCallResult, *rpcError) {
 	}
 	if errors.Is(err, db.ErrVersionConflict) {
 		return errorResult("version conflict: reload and retry")
+	}
+	if errors.Is(err, db.ErrStorageCap) {
+		return errorResult("Storage cap reached. Contact your administrator to adjust your cap.")
+	}
+	if errors.Is(err, db.ErrTransferCap) {
+		return errorResult("Monthly transfer cap reached. Contact your administrator to adjust your cap.")
 	}
 	log.Printf("mcp: db error: %v", err)
 	return nil, &rpcError{Code: codeInternalError, Message: "internal error"}

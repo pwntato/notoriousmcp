@@ -343,13 +343,15 @@ func (h *Handler) adminTools() []registeredTool {
 		{
 			def: toolDef{
 				Name:        "update_user",
-				Description: "Update a user's status.",
+				Description: "Update a user's status and optionally their storage or transfer cap. Pass -1 for a cap to clear the per-user override and restore the server default.",
 				InputSchema: schema{
 					Type:     "object",
 					Required: []string{"user_id", "status"},
 					Properties: map[string]property{
-						"user_id": {Type: "string", Description: "User ID."},
-						"status":  {Type: "string", Description: "New status.", Enum: []string{"pending", "user", "admin", "banned"}},
+						"user_id":            {Type: "string", Description: "User ID."},
+						"status":             {Type: "string", Description: "New status.", Enum: []string{"pending", "user", "admin", "banned"}},
+						"storage_cap_bytes":  {Type: "number", Description: "Per-user storage cap in bytes. Omit to leave unchanged; pass -1 to restore server default."},
+						"transfer_cap_bytes": {Type: "number", Description: "Per-user monthly transfer cap in bytes. Omit to leave unchanged; pass -1 to restore server default."},
 					},
 				},
 			},

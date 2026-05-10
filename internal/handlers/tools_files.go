@@ -48,9 +48,19 @@ func (h *Handler) handleGetFile(ctx context.Context, user *models.User, args map
 		return nil, &rpcError{Code: codeInvalidParams, Message: err.Error()}
 	}
 
+	transferUsed, rpcErr := h.checkTransferCap(ctx, user)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+
 	f, err := h.db.GetFile(ctx, user.UserID, filePath)
 	if err != nil {
 		return dbErrResult(err)
+	}
+
+	contentBytes := f.Size
+	if transferUsed+contentBytes > h.effectiveTransferCap(user) {
+		return dbErrResult(db.ErrTransferCap)
 	}
 
 	content, err := h.store.GetContent(ctx, f.S3Key)
@@ -61,7 +71,17 @@ func (h *Handler) handleGetFile(ctx context.Context, user *models.User, args map
 		return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
 	}
 	f.Content = content
-	return jsonResult(f)
+	result, rpcErr := jsonResult(f)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+
+	responseBytes := int64(len([]byte(result.Content[0].Text)))
+	if _, err := h.db.AddTransferUsed(ctx, user.UserID, currentMonth(), responseBytes, transferTTL()); err != nil {
+		log.Printf("mcp: get file %s: record transfer: %v", filePath, err)
+	}
+
+	return result, nil
 }
 
 func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args map[string]any) (*toolsCallResult, *rpcError) {
@@ -80,6 +100,7 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 	}
 
 	now := time.Now().UTC()
+	newSize := int64(len([]byte(content)))
 	var f *models.File
 
 	existing, dbErr := h.db.GetFile(ctx, user.UserID, filePath)
@@ -89,13 +110,17 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 	// existing is nil iff GetFile returned ErrNotFound; the block below always returns,
 	// so all code after it can safely dereference existing.
 	if existing == nil {
+		if user.StorageUsedBytes+newSize > h.effectiveStorageCap(user) {
+			return dbErrResult(db.ErrStorageCap)
+		}
+
 		f = &models.File{
 			Path:   filePath,
 			UserID: user.UserID,
 			// Same stable-key-on-create trade-off as handleSaveNote; DB enforces
 			// attribute_not_exists on Version==1 writes.
 			S3Key:      fmt.Sprintf("files/%s/%s/%s", user.UserID, filePath, newID()),
-			Size:       int64(len([]byte(content))),
+			Size:       newSize,
 			Version:    1,
 			CreatedAt:  now,
 			ModifiedAt: now,
@@ -113,7 +138,16 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 			return dbErrResult(err)
 		}
 
+		if err := h.db.AddStorageUsed(ctx, user.UserID, newSize); err != nil {
+			log.Printf("mcp: save file %s: update storage used: %v", filePath, err)
+		}
+
 		return jsonResult(f)
+	}
+
+	delta := newSize - existing.Size
+	if delta > 0 && user.StorageUsedBytes+delta > h.effectiveStorageCap(user) {
+		return dbErrResult(db.ErrStorageCap)
 	}
 
 	version := versionArg(args)
@@ -127,7 +161,7 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 		UserID: user.UserID,
 		// Fresh S3 key per write: same rationale as handleSaveNote.
 		S3Key:      fmt.Sprintf("files/%s/%s/%s", user.UserID, filePath, newID()),
-		Size:       int64(len([]byte(content))),
+		Size:       newSize,
 		Version:    version,
 		CreatedAt:  existing.CreatedAt,
 		ModifiedAt: now,
@@ -150,6 +184,10 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 	// Log on failure but don't surface the error — the save already succeeded.
 	if err := h.store.DeleteContent(ctx, existing.S3Key); err != nil {
 		log.Printf("mcp: save file %s: cleanup old s3 key %s: %v", filePath, existing.S3Key, err)
+	}
+
+	if err := h.db.AddStorageUsed(ctx, user.UserID, delta); err != nil {
+		log.Printf("mcp: save file %s: update storage used: %v", filePath, err)
 	}
 
 	return jsonResult(f)
@@ -180,6 +218,10 @@ func (h *Handler) handleDeleteFile(ctx context.Context, user *models.User, args 
 	if err := h.store.DeleteContent(ctx, f.S3Key); err != nil {
 		log.Printf("mcp: delete file %s: s3 delete %s: %v", filePath, f.S3Key, err)
 		return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
+	}
+
+	if err := h.db.AddStorageUsed(ctx, user.UserID, -f.Size); err != nil {
+		log.Printf("mcp: delete file %s: update storage used: %v", filePath, err)
 	}
 
 	return textResult("file deleted")
