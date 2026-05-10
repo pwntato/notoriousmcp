@@ -69,7 +69,7 @@ func (h *Handler) handleGetFile(ctx context.Context, user *models.User, args map
 	// Check and record transfer using the actual response size so both sides
 	// of the enforcement use the same unit.
 	responseBytes := int64(len([]byte(result.Content[0].Text)))
-	transferUsed, rpcErr := h.checkTransferCap(ctx, user)
+	transferUsed, rpcErr := h.readTransferUsed(ctx, user)
 	if rpcErr != nil {
 		return nil, rpcErr
 	}

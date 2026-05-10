@@ -492,20 +492,11 @@ func saveIntegrationUser(t *testing.T, dbClient *db.Client, status models.UserSt
 	return u
 }
 
-// newIntegrationHandler wraps the real handler with auth.Middleware so that
-// real Bearer tokens are validated against DynamoDB.
+// newIntegrationHandler wraps the real handler with auth.Middleware using
+// server-default caps (1 GB each). Delegates to newIntegrationHandlerWithConfig.
 func newIntegrationHandler(t *testing.T, dbClient *db.Client, storeClient *store.Client) http.Handler {
 	t.Helper()
-	h := handlers.New(dbClient, storeClient, handlers.Config{})
-	mux := http.NewServeMux()
-	h.RegisterRoutes(mux)
-	cfg := auth.Config{
-		ClientID:     "x",
-		ClientSecret: "x",
-		RedirectURL:  "https://example.com/auth/callback",
-		TokenSecret:  testSecret,
-	}
-	return auth.Middleware(cfg, dbClient, mux)
+	return newIntegrationHandlerWithConfig(t, dbClient, storeClient, handlers.Config{})
 }
 
 func doIntegrationRequest(t *testing.T, h http.Handler, userID string, method string, params any) *rpcResp {
@@ -1085,6 +1076,62 @@ func TestIntegrationPerUserCapOverride(t *testing.T) {
 			"arguments": map[string]any{"note_id": noteID},
 		})
 	})
+}
+
+func TestIntegrationStorageCapEnforcedOnUpdate(t *testing.T) {
+	dbClient, storeClient := newTestClients(t)
+	user := saveIntegrationUser(t, dbClient, models.StatusUser)
+	// Cap is 50 bytes — enough for the initial save but not the larger update.
+	h := newIntegrationHandlerWithConfig(t, dbClient, storeClient, handlers.Config{
+		DefaultStorageCap:  50,
+		DefaultTransferCap: handlers.DefaultTransferCapBytes,
+	})
+
+	// Create a small note that fits under the cap.
+	resp := doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name": "save_note",
+		"arguments": map[string]any{
+			"title":   "Cap Update Test",
+			"content": "small",
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("save_note (create): %+v", resp.Error)
+	}
+	var createResult struct{ IsError bool }
+	if err := json.Unmarshal(resp.Result, &createResult); err != nil {
+		t.Fatalf("unmarshal create: %v", err)
+	}
+	if createResult.IsError {
+		t.Fatalf("save_note (create) unexpectedly blocked: %s", firstContentText(t, resp.Result))
+	}
+	noteID := extractField(t, resp.Result, "id")
+	t.Cleanup(func() {
+		doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+			"name":      "delete_note",
+			"arguments": map[string]any{"note_id": noteID},
+		})
+	})
+
+	// Update with content large enough to push the total over the 50-byte cap.
+	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name": "save_note",
+		"arguments": map[string]any{
+			"note_id": noteID,
+			"title":   "Cap Update Test",
+			"content": "this updated content is definitely more than fifty bytes total",
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("unexpected RPC error on update: %+v", resp.Error)
+	}
+	var updateResult struct{ IsError bool }
+	if err := json.Unmarshal(resp.Result, &updateResult); err != nil {
+		t.Fatalf("unmarshal update: %v", err)
+	}
+	if !updateResult.IsError {
+		t.Error("expected isError=true when update pushes note past storage cap")
+	}
 }
 
 func TestIntegrationPerUserTransferCapOverride(t *testing.T) {

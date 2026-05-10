@@ -99,16 +99,16 @@ func transferTTL() int64 {
 	return time.Now().UTC().Add(transferRecordTTL).Unix()
 }
 
-// checkTransferCap reads the current month's transfer usage for the user and
-// returns it. The caller fetches S3 content first, serializes the response,
-// then calls this to decide whether to block (post-fetch check). The check is
-// post-fetch by design: response size can only be known after serialization.
+// readTransferUsed returns the current month's transfer byte total for the user.
+// Callers fetch S3 content first, serialize the response, then call this and
+// compare the result against effectiveTransferCap to decide whether to block
+// (post-fetch by design: response size is only known after serialization).
 //
 // The read-check-increment is not atomic: two concurrent requests can both pass
-// the check and both record transfer, potentially exceeding the cap by up to one
+// the cap check and both record transfer, exceeding the cap by up to one
 // response's worth of bytes. This is accepted as soft enforcement — the cap is
 // an abuse guard, not a hard billing limit.
-func (h *Handler) checkTransferCap(ctx context.Context, user *models.User) (int64, *rpcError) {
+func (h *Handler) readTransferUsed(ctx context.Context, user *models.User) (int64, *rpcError) {
 	used, err := h.db.GetTransferUsed(ctx, user.UserID, currentMonth())
 	if err != nil {
 		log.Printf("mcp: get transfer used for %s: %v", user.UserID, err)
