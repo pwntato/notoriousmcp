@@ -783,3 +783,33 @@ func TestSaveRefreshTokenNotFound(t *testing.T) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }
+
+func TestDeleteUser(t *testing.T) {
+	c := newTestClient(t)
+	ctx := context.Background()
+
+	u := &models.User{
+		UserID:    uid(),
+		Email:     "delete@example.com",
+		Name:      "Delete Me",
+		Status:    models.StatusPending,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := c.SaveUser(ctx, u); err != nil {
+		t.Fatalf("save user: %v", err)
+	}
+
+	if err := c.DeleteUser(ctx, u.UserID); err != nil {
+		t.Fatalf("delete user: %v", err)
+	}
+
+	_, err := c.GetUser(ctx, u.UserID)
+	if !errors.Is(err, db.ErrNotFound) {
+		t.Errorf("expected ErrNotFound after delete, got %v", err)
+	}
+
+	// Deleting a non-existent user is a no-op.
+	if err := c.DeleteUser(ctx, "nonexistent-"+uid()); err != nil {
+		t.Errorf("delete non-existent user: expected no error, got %v", err)
+	}
+}

@@ -708,6 +708,12 @@ func TestIntegrationVersionConflict(t *testing.T) {
 		t.Fatalf("save_note v1: %+v", resp.Error)
 	}
 	noteID := extractField(t, resp.Result, "id")
+	t.Cleanup(func() {
+		doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+			"name":      "delete_note",
+			"arguments": map[string]any{"note_id": noteID},
+		})
+	})
 
 	// Update once to advance version to 2 — assert it succeeds.
 	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
