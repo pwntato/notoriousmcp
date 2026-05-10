@@ -99,23 +99,37 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 			CreatedAt:  now,
 			ModifiedAt: now,
 		}
-	} else {
-		version := versionArg(args)
-		if version == 0 {
-			// version omitted: auto-increment bypasses optimistic concurrency.
-			// Callers that need conflict detection must pass the current version.
-			version = existing.Version + 1
+
+		// Create path: stable S3 key, no old object to clean up.
+		if err := h.store.PutContent(ctx, f.S3Key, content); err != nil {
+			if errors.Is(err, store.ErrTooLarge) {
+				return errorResult("content exceeds 1MB limit")
+			}
+			return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
 		}
-		f = &models.File{
-			Path:   filePath,
-			UserID: user.UserID,
-			// Fresh S3 key per write: same rationale as handleSaveNote.
-			S3Key:      fmt.Sprintf("files/%s/%s/%s", user.UserID, filePath, newID()),
-			Size:       int64(len([]byte(content))),
-			Version:    version,
-			CreatedAt:  existing.CreatedAt,
-			ModifiedAt: now,
+
+		if err := h.db.SaveFile(ctx, f); err != nil {
+			return dbErrResult(err)
 		}
+
+		return jsonResult(f)
+	}
+
+	version := versionArg(args)
+	if version == 0 {
+		// version omitted: auto-increment bypasses optimistic concurrency.
+		// Callers that need conflict detection must pass the current version.
+		version = existing.Version + 1
+	}
+	f = &models.File{
+		Path:   filePath,
+		UserID: user.UserID,
+		// Fresh S3 key per write: same rationale as handleSaveNote.
+		S3Key:      fmt.Sprintf("files/%s/%s/%s", user.UserID, filePath, newID()),
+		Size:       int64(len([]byte(content))),
+		Version:    version,
+		CreatedAt:  existing.CreatedAt,
+		ModifiedAt: now,
 	}
 
 	// S3 write precedes DynamoDB write; on DB conflict the new S3 object is
@@ -129,6 +143,12 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 
 	if err := h.db.SaveFile(ctx, f); err != nil {
 		return dbErrResult(err)
+	}
+
+	// DB write succeeded; delete the now-unreferenced previous S3 object.
+	// Log on failure but don't surface the error — the save already succeeded.
+	if err := h.store.DeleteContent(ctx, existing.S3Key); err != nil {
+		log.Printf("mcp: save file %s: cleanup old s3 key %s: %v", filePath, existing.S3Key, err)
 	}
 
 	return jsonResult(f)
