@@ -1001,6 +1001,81 @@ func TestIntegrationUsageVisibleInListUsers(t *testing.T) {
 	}
 }
 
+func TestIntegrationPerUserCapOverride(t *testing.T) {
+	dbClient, storeClient := newTestClients(t)
+	admin := saveIntegrationUser(t, dbClient, models.StatusAdmin)
+	user := saveIntegrationUser(t, dbClient, models.StatusUser)
+	h := newIntegrationHandler(t, dbClient, storeClient)
+
+	// Set a tiny storage cap (10 bytes) via update_user — no status change.
+	resp := doIntegrationRequest(t, h, admin.UserID, "tools/call", map[string]any{
+		"name": "update_user",
+		"arguments": map[string]any{
+			"user_id":           user.UserID,
+			"storage_cap_bytes": float64(10),
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("update_user (set cap): %+v", resp.Error)
+	}
+	var updateResult struct{ IsError bool }
+	if err := json.Unmarshal(resp.Result, &updateResult); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if updateResult.IsError {
+		t.Fatalf("update_user (set cap): unexpected isError=true: %s", firstContentText(t, resp.Result))
+	}
+
+	// save_note must be blocked by the tiny per-user cap.
+	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name": "save_note",
+		"arguments": map[string]any{
+			"title":   "Cap Override Test",
+			"content": "this is more than 10 bytes of content",
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("unexpected RPC error: %+v", resp.Error)
+	}
+	var saveResult struct{ IsError bool }
+	if err := json.Unmarshal(resp.Result, &saveResult); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !saveResult.IsError {
+		t.Error("expected isError=true when per-user storage cap exceeded")
+	}
+
+	// Clear the cap via -1; save should now succeed.
+	resp = doIntegrationRequest(t, h, admin.UserID, "tools/call", map[string]any{
+		"name": "update_user",
+		"arguments": map[string]any{
+			"user_id":           user.UserID,
+			"storage_cap_bytes": float64(-1),
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("update_user (clear cap): %+v", resp.Error)
+	}
+
+	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name": "save_note",
+		"arguments": map[string]any{
+			"title":   "Cap Override Test",
+			"content": "this is more than 10 bytes of content",
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("save_note after cap cleared: %+v", resp.Error)
+	}
+	noteID := extractField(t, resp.Result, "id")
+	t.Cleanup(func() {
+		doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+			"name":      "delete_note",
+			"arguments": map[string]any{"note_id": noteID},
+		})
+	})
+}
+
 // ---- test helpers ----
 
 type toolEntry struct {

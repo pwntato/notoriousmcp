@@ -146,6 +146,9 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 		return jsonResult(f)
 	}
 
+	// Files written before storage tracking was added have Size==0. Same
+	// migration trade-off as handleSaveNote: first-update overcounts, delete
+	// of a never-updated old file undercounts. Accepted for a soft cap.
 	delta := newSize - existing.Size
 	// Same soft-enforcement trade-off as the create path above.
 	if delta > 0 && user.StorageUsedBytes+delta > h.effectiveStorageCap(user) {

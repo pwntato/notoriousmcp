@@ -35,6 +35,7 @@ func (h *Handler) handleListUsers(ctx context.Context, args map[string]any) (*to
 
 	month := currentMonth()
 	out := make([]userWithUsage, 0, len(users))
+	// TODO: replace with BatchGetItem if user count grows large.
 	for _, u := range users {
 		transferUsed, err := h.db.GetTransferUsed(ctx, u.UserID, month)
 		if err != nil {
@@ -66,32 +67,35 @@ func (h *Handler) handleUpdateUser(ctx context.Context, caller *models.User, arg
 	if err != nil {
 		return nil, &rpcError{Code: codeInvalidParams, Message: err.Error()}
 	}
-	statusStr, err := strArg(args, "status")
-	if err != nil {
-		return nil, &rpcError{Code: codeInvalidParams, Message: err.Error()}
-	}
 
-	status := models.UserStatus(statusStr)
-	switch status {
-	case models.StatusPending, models.StatusUser, models.StatusAdmin, models.StatusBanned:
-	default:
-		return nil, &rpcError{Code: codeInvalidParams, Message: "invalid status value"}
-	}
-
-	if userID == caller.UserID && status != models.StatusAdmin {
-		return errorResult("admins cannot change their own status")
-	}
-
-	if err := h.db.UpdateUserStatus(ctx, userID, status); err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			return errorResult("user not found")
+	// status is optional — omit when only updating caps.
+	statusStr := strArgOpt(args, "status")
+	if statusStr != "" {
+		status := models.UserStatus(statusStr)
+		switch status {
+		case models.StatusPending, models.StatusUser, models.StatusAdmin, models.StatusBanned:
+		default:
+			return nil, &rpcError{Code: codeInvalidParams, Message: "invalid status value"}
 		}
-		return dbErrResult(err)
+
+		if userID == caller.UserID && status != models.StatusAdmin {
+			return errorResult("admins cannot change their own status")
+		}
+
+		if err := h.db.UpdateUserStatus(ctx, userID, status); err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				return errorResult("user not found")
+			}
+			return dbErrResult(err)
+		}
+		log.Printf("admin: user %s status set to %s", userID, status)
 	}
 
 	// Optional cap overrides. Each field is independent: omit to leave unchanged,
 	// pass -1 to clear the per-user override and restore the server default.
+	anyCap := false
 	if storageCap, hasStorage := int64ArgOpt(args, "storage_cap_bytes"); hasStorage {
+		anyCap = true
 		var capPtr *int64
 		if storageCap >= 0 {
 			capPtr = &storageCap
@@ -105,6 +109,7 @@ func (h *Handler) handleUpdateUser(ctx context.Context, caller *models.User, arg
 		}
 	}
 	if transferCap, hasTransfer := int64ArgOpt(args, "transfer_cap_bytes"); hasTransfer {
+		anyCap = true
 		var capPtr *int64
 		if transferCap >= 0 {
 			capPtr = &transferCap
@@ -118,6 +123,9 @@ func (h *Handler) handleUpdateUser(ctx context.Context, caller *models.User, arg
 		}
 	}
 
-	log.Printf("admin: user %s status set to %s", userID, status)
+	if statusStr == "" && !anyCap {
+		return nil, &rpcError{Code: codeInvalidParams, Message: "at least one of status, storage_cap_bytes, or transfer_cap_bytes must be provided"}
+	}
+
 	return textResult("user updated")
 }

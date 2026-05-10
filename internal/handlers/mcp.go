@@ -56,29 +56,29 @@ func New(dbClient *db.Client, storeClient *store.Client, cfg Config) *Handler {
 }
 
 // effectiveStorageCap returns the storage cap in bytes for a user, falling back
-// to the server default. A cap of 0 (set explicitly via update_user) blocks all
-// writes — this is intentional. A negative value is clamped to 1 to avoid
-// arithmetic confusion; negative caps should never be stored but guard anyway.
+// to the server default. A per-user cap of 0 blocks all writes — intentional.
+// Negative values can't be stored (handleUpdateUser rejects them via the >= 0
+// guard), but clamp to 0 defensively so the > comparison stays correct.
 func (h *Handler) effectiveStorageCap(u *models.User) int64 {
 	cap := h.cfg.DefaultStorageCap
 	if u.StorageCapBytes != nil {
 		cap = *u.StorageCapBytes
 	}
 	if cap < 0 {
-		return 1
+		return 0
 	}
 	return cap
 }
 
 // effectiveTransferCap returns the monthly transfer cap in bytes for a user,
-// falling back to the server default. Same zero/negative semantics as effectiveStorageCap.
+// falling back to the server default. Same semantics as effectiveStorageCap.
 func (h *Handler) effectiveTransferCap(u *models.User) int64 {
 	cap := h.cfg.DefaultTransferCap
 	if u.TransferCapBytes != nil {
 		cap = *u.TransferCapBytes
 	}
 	if cap < 0 {
-		return 1
+		return 0
 	}
 	return cap
 }
@@ -88,9 +88,15 @@ func currentMonth() string {
 	return time.Now().UTC().Format("2006-01")
 }
 
-// transferTTL returns a Unix timestamp 60 days from now, used as TTL on transfer records.
+// transferRecordTTL is how long monthly transfer records are retained. 60 days
+// ensures the previous month is always available for debugging while old records
+// auto-delete without a cron job.
+const transferRecordTTL = 60 * 24 * time.Hour
+
+// transferTTL returns a Unix timestamp transferRecordTTL from now, for use as
+// the DynamoDB TTL attribute on TRANSFER#YYYY-MM items.
 func transferTTL() int64 {
-	return time.Now().UTC().Add(60 * 24 * time.Hour).Unix()
+	return time.Now().UTC().Add(transferRecordTTL).Unix()
 }
 
 // checkTransferCap reads the current month's transfer usage for the user and

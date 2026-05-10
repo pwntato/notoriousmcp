@@ -275,6 +275,9 @@ func updateSingleCap(ctx context.Context, c *Client, userID, attr, nameKey, valK
 			valKey: &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", *cap)},
 		}
 	} else {
+		// REMOVE uses the raw attribute name rather than an expression attribute
+		// name. This is safe because attr is hardcoded ("StorageCapBytes" or
+		// "TransferCapBytes"), neither of which is a DynamoDB reserved word.
 		expr = "REMOVE " + attr
 	}
 	input.UpdateExpression = aws.String(expr)

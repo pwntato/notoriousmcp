@@ -343,10 +343,10 @@ func (h *Handler) adminTools() []registeredTool {
 		{
 			def: toolDef{
 				Name:        "update_user",
-				Description: "Update a user's status and optionally their storage or transfer cap. Pass -1 for a cap to clear the per-user override and restore the server default.",
+				Description: "Update a user's status and/or caps. All fields except user_id are optional; at least one must be provided. Pass -1 for a cap to restore the server default.",
 				InputSchema: schema{
 					Type:     "object",
-					Required: []string{"user_id", "status"},
+					Required: []string{"user_id"},
 					Properties: map[string]property{
 						"user_id":            {Type: "string", Description: "User ID."},
 						"status":             {Type: "string", Description: "New status.", Enum: []string{"pending", "user", "admin", "banned"}},

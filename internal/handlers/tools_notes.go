@@ -134,7 +134,12 @@ func (h *Handler) handleSaveNote(ctx context.Context, user *models.User, args ma
 	}
 
 	oldSize := existing.Size
+	// Notes written before storage tracking was added have Size==0. On their
+	// first update delta = newSize (overcounts); on delete we subtract 0
+	// (undercounts). StorageUsedBytes is only accurate for items written after
+	// this feature was deployed — accepted for a soft cap.
 	delta := newSize - oldSize
+	// Same soft-enforcement trade-off as the create path above.
 	if delta > 0 && user.StorageUsedBytes+delta > h.effectiveStorageCap(user) {
 		return dbErrResult(db.ErrStorageCap)
 	}
