@@ -102,11 +102,31 @@ func (h *Handler) handleSaveNote(ctx context.Context, user *models.User, args ma
 			CreatedAt:  existing.CreatedAt,
 			ModifiedAt: now,
 		}
+
+		// S3 write precedes DynamoDB write; on DB conflict the new S3 object is
+		// orphaned but the previous version's object is untouched (version-stamped
+		// keys ensure writes never overwrite earlier content).
+		if err := h.store.PutContent(ctx, note.S3Key, content); err != nil {
+			if errors.Is(err, store.ErrTooLarge) {
+				return errorResult("content exceeds 1MB limit")
+			}
+			return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
+		}
+
+		if err := h.db.SaveNote(ctx, note); err != nil {
+			return dbErrResult(err)
+		}
+
+		// DB write succeeded; delete the now-unreferenced previous S3 object.
+		// Log on failure but don't surface the error — the save already succeeded.
+		if err := h.store.DeleteContent(ctx, existing.S3Key); err != nil {
+			log.Printf("mcp: save note %s: cleanup old s3 key %s: %v", noteID, existing.S3Key, err)
+		}
+
+		return jsonResult(note)
 	}
 
-	// S3 write precedes DynamoDB write; on DB conflict the new S3 object is
-	// orphaned but the previous version's object is untouched (version-stamped
-	// keys ensure writes never overwrite earlier content).
+	// Create path: stable S3 key, no old object to clean up.
 	if err := h.store.PutContent(ctx, note.S3Key, content); err != nil {
 		if errors.Is(err, store.ErrTooLarge) {
 			return errorResult("content exceeds 1MB limit")

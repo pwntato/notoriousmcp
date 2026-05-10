@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -549,6 +550,33 @@ func TestIntegrationNoteCreateGetDelete(t *testing.T) {
 	}
 	noteID := extractField(t, resp.Result, "id")
 
+	// Capture the S3 key before updating so we can assert it's cleaned up.
+	noteV1, err := dbClient.GetNote(context.Background(), user.UserID, noteID)
+	if err != nil {
+		t.Fatalf("get note from db: %v", err)
+	}
+	oldS3Key := noteV1.S3Key
+
+	// Update.
+	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name": "save_note",
+		"arguments": map[string]any{
+			"note_id": noteID,
+			"title":   "Integration Test Note",
+			"content": "updated content",
+			"tags":    []any{"test"},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("save_note update: %+v", resp.Error)
+	}
+
+	// Old S3 key must be gone.
+	_, err = storeClient.GetContent(context.Background(), oldS3Key)
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("old s3 key %q: want ErrNotFound, got %v", oldS3Key, err)
+	}
+
 	// Get.
 	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
 		"name":      "get_note",
@@ -557,8 +585,8 @@ func TestIntegrationNoteCreateGetDelete(t *testing.T) {
 	if resp.Error != nil {
 		t.Fatalf("get_note: %+v", resp.Error)
 	}
-	if content := extractField(t, resp.Result, "content"); content != "hello world" {
-		t.Errorf("content: got %q want \"hello world\"", content)
+	if content := extractField(t, resp.Result, "content"); content != "updated content" {
+		t.Errorf("content: got %q want \"updated content\"", content)
 	}
 
 	// Delete.
@@ -639,6 +667,31 @@ func TestIntegrationFileRoundTrip(t *testing.T) {
 		t.Fatalf("save_file: %+v", resp.Error)
 	}
 
+	// Capture the S3 key before updating so we can assert it's cleaned up.
+	fileV1, err := dbClient.GetFile(context.Background(), user.UserID, path)
+	if err != nil {
+		t.Fatalf("get file from db: %v", err)
+	}
+	oldS3Key := fileV1.S3Key
+
+	// Update.
+	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name": "save_file",
+		"arguments": map[string]any{
+			"path":    path,
+			"content": "updated contents",
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("save_file update: %+v", resp.Error)
+	}
+
+	// Old S3 key must be gone.
+	_, err = storeClient.GetContent(context.Background(), oldS3Key)
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("old s3 key %q: want ErrNotFound, got %v", oldS3Key, err)
+	}
+
 	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
 		"name":      "get_file",
 		"arguments": map[string]any{"path": path},
@@ -646,8 +699,8 @@ func TestIntegrationFileRoundTrip(t *testing.T) {
 	if resp.Error != nil {
 		t.Fatalf("get_file: %+v", resp.Error)
 	}
-	if content := extractField(t, resp.Result, "content"); content != "file contents" {
-		t.Errorf("content: got %q", content)
+	if content := extractField(t, resp.Result, "content"); content != "updated contents" {
+		t.Errorf("content: got %q want \"updated contents\"", content)
 	}
 
 	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
