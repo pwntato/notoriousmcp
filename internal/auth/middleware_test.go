@@ -198,6 +198,7 @@ func saveTestUser(t *testing.T, c *db.Client, userID string, status models.UserS
 	if err := c.SaveUser(context.Background(), u); err != nil {
 		t.Fatalf("save test user: %v", err)
 	}
+	t.Cleanup(func() { _ = c.DeleteUser(context.Background(), userID) })
 	return u
 }
 

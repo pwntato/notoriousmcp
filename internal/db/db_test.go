@@ -48,6 +48,7 @@ func TestUserRoundTrip(t *testing.T) {
 	if err := c.SaveUser(ctx, u); err != nil {
 		t.Fatalf("save user: %v", err)
 	}
+	t.Cleanup(func() { _ = c.DeleteUser(ctx, u.UserID) })
 
 	got, err := c.GetUser(ctx, u.UserID)
 	if err != nil {
@@ -75,6 +76,7 @@ func TestRefreshToken(t *testing.T) {
 	if err := c.SaveUser(ctx, u); err != nil {
 		t.Fatalf("save user: %v", err)
 	}
+	t.Cleanup(func() { _ = c.DeleteUser(ctx, u.UserID) })
 	if err := c.SaveRefreshToken(ctx, u.UserID, "token-abc"); err != nil {
 		t.Fatalf("save refresh token: %v", err)
 	}
@@ -101,6 +103,7 @@ func TestUpdateUserStatus(t *testing.T) {
 	if err := c.SaveUser(ctx, u); err != nil {
 		t.Fatalf("save user: %v", err)
 	}
+	t.Cleanup(func() { _ = c.DeleteUser(ctx, u.UserID) })
 	if err := c.UpdateUserStatus(ctx, u.UserID, models.StatusUser); err != nil {
 		t.Fatalf("update status: %v", err)
 	}
@@ -136,6 +139,7 @@ func TestSaveUserIdempotency(t *testing.T) {
 	if err := c.SaveUser(ctx, u); err != nil {
 		t.Fatalf("first save: %v", err)
 	}
+	t.Cleanup(func() { _ = c.DeleteUser(ctx, u.UserID) })
 
 	// Second save with a different CreatedAt should not overwrite the original;
 	// Name update should take effect.
@@ -178,6 +182,7 @@ func TestNoteRoundTrip(t *testing.T) {
 	if err := c.SaveNote(ctx, n); err != nil {
 		t.Fatalf("save note: %v", err)
 	}
+	t.Cleanup(func() { _ = c.DeleteNote(ctx, n.UserID, n.ID) })
 	got, err := c.GetNote(ctx, n.UserID, n.ID)
 	if err != nil {
 		t.Fatalf("get note: %v", err)
@@ -207,6 +212,7 @@ func TestNoteVersionConflict(t *testing.T) {
 	if err := c.SaveNote(ctx, n); err != nil {
 		t.Fatalf("save v1: %v", err)
 	}
+	t.Cleanup(func() { _ = c.DeleteNote(ctx, userID, noteID) })
 	n2 := *n
 	n2.Title = "v2"
 	n2.Version = 2
@@ -228,6 +234,7 @@ func TestListNotes(t *testing.T) {
 
 	userID := uid()
 	now := time.Now().UTC()
+	var noteIDs []string
 	for i := range 3 {
 		n := &models.Note{
 			ID: uid(), UserID: userID,
@@ -237,7 +244,13 @@ func TestListNotes(t *testing.T) {
 		if err := c.SaveNote(ctx, n); err != nil {
 			t.Fatalf("save note %d: %v", i, err)
 		}
+		noteIDs = append(noteIDs, n.ID)
 	}
+	t.Cleanup(func() {
+		for _, id := range noteIDs {
+			_ = c.DeleteNote(ctx, userID, id)
+		}
+	})
 	notes, err := c.ListNotes(ctx, userID, "")
 	if err != nil {
 		t.Fatalf("list notes: %v", err)
@@ -267,6 +280,8 @@ func TestListNotesModifiedSince(t *testing.T) {
 		if err := c.SaveNote(ctx, n); err != nil {
 			t.Fatalf("save note: %v", err)
 		}
+		n := n
+		t.Cleanup(func() { _ = c.DeleteNote(ctx, n.UserID, n.ID) })
 	}
 
 	since := base.Add(-time.Minute).UTC().Format(time.RFC3339)
@@ -318,6 +333,7 @@ func TestTodoListRoundTrip(t *testing.T) {
 	if err := c.SaveTodoList(ctx, l); err != nil {
 		t.Fatalf("save: %v", err)
 	}
+	t.Cleanup(func() { _ = c.DeleteTodoList(ctx, l.UserID, l.ID) })
 	got, err := c.GetTodoList(ctx, l.UserID, l.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
@@ -340,6 +356,7 @@ func TestTodoListVersionConflict(t *testing.T) {
 	if err := c.SaveTodoList(ctx, l); err != nil {
 		t.Fatalf("save v1: %v", err)
 	}
+	t.Cleanup(func() { _ = c.DeleteTodoList(ctx, l.UserID, l.ID) })
 	l2 := *l
 	l2.Version = 2
 	if err := c.SaveTodoList(ctx, &l2); err != nil {
@@ -380,6 +397,7 @@ func TestListTodoLists(t *testing.T) {
 
 	userID := uid()
 	now := time.Now().UTC()
+	var listIDs []string
 	for i := range 3 {
 		l := &models.TodoList{
 			ID: uid(), UserID: userID,
@@ -389,7 +407,13 @@ func TestListTodoLists(t *testing.T) {
 		if err := c.SaveTodoList(ctx, l); err != nil {
 			t.Fatalf("save list %d: %v", i, err)
 		}
+		listIDs = append(listIDs, l.ID)
 	}
+	t.Cleanup(func() {
+		for _, id := range listIDs {
+			_ = c.DeleteTodoList(ctx, userID, id)
+		}
+	})
 	lists, err := c.ListTodoLists(ctx, userID)
 	if err != nil {
 		t.Fatalf("list: %v", err)
@@ -413,6 +437,7 @@ func TestTodoRoundTrip(t *testing.T) {
 	if err := c.SaveTodo(ctx, todo); err != nil {
 		t.Fatalf("save: %v", err)
 	}
+	t.Cleanup(func() { _ = c.DeleteTodo(ctx, todo.UserID, todo.ListID, todo.ID) })
 	got, err := c.GetTodo(ctx, todo.UserID, todo.ListID, todo.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
@@ -439,6 +464,7 @@ func TestTodoVersionConflict(t *testing.T) {
 	if err := c.SaveTodo(ctx, todo); err != nil {
 		t.Fatalf("save v1: %v", err)
 	}
+	t.Cleanup(func() { _ = c.DeleteTodo(ctx, userID, listID, todoID) })
 	t2 := *todo
 	t2.Version = 2
 	if err := c.SaveTodo(ctx, &t2); err != nil {
@@ -489,6 +515,7 @@ func TestFileRoundTrip(t *testing.T) {
 	if err := c.SaveFile(ctx, f); err != nil {
 		t.Fatalf("save: %v", err)
 	}
+	t.Cleanup(func() { _ = c.DeleteFile(ctx, f.UserID, f.Path) })
 	got, err := c.GetFile(ctx, f.UserID, f.Path)
 	if err != nil {
 		t.Fatalf("get: %v", err)
@@ -515,6 +542,7 @@ func TestFileVersionConflict(t *testing.T) {
 	if err := c.SaveFile(ctx, f); err != nil {
 		t.Fatalf("save v1: %v", err)
 	}
+	t.Cleanup(func() { _ = c.DeleteFile(ctx, f.UserID, f.Path) })
 	f2 := *f
 	f2.Version = 2
 	if err := c.SaveFile(ctx, &f2); err != nil {
@@ -533,6 +561,7 @@ func TestListFiles(t *testing.T) {
 
 	userID := uid()
 	now := time.Now().UTC()
+	var filePaths []string
 	for i := range 2 {
 		f := &models.File{
 			Path: fmt.Sprintf("%s-file-%d.md", uid(), i), UserID: userID,
@@ -542,7 +571,13 @@ func TestListFiles(t *testing.T) {
 		if err := c.SaveFile(ctx, f); err != nil {
 			t.Fatalf("save file %d: %v", i, err)
 		}
+		filePaths = append(filePaths, f.Path)
 	}
+	t.Cleanup(func() {
+		for _, p := range filePaths {
+			_ = c.DeleteFile(ctx, userID, p)
+		}
+	})
 	files, err := c.ListFiles(ctx, userID, "")
 	if err != nil {
 		t.Fatalf("list: %v", err)
@@ -560,6 +595,7 @@ func TestListTodosModifiedSinceScoped(t *testing.T) {
 	listA, listB := uid(), uid()
 	now := time.Now().UTC()
 
+	var todosA []string
 	for i := range 2 {
 		todo := &models.Todo{
 			ID: uid(), ListID: listA, UserID: userID,
@@ -569,7 +605,13 @@ func TestListTodosModifiedSinceScoped(t *testing.T) {
 		if err := c.SaveTodo(ctx, todo); err != nil {
 			t.Fatalf("save list-a todo %d: %v", i, err)
 		}
+		todosA = append(todosA, todo.ID)
 	}
+	t.Cleanup(func() {
+		for _, id := range todosA {
+			_ = c.DeleteTodo(ctx, userID, listA, id)
+		}
+	})
 	todoB := &models.Todo{
 		ID: uid(), ListID: listB, UserID: userID,
 		Text: "b", Status: models.TodoPending, Version: 1,
@@ -578,6 +620,7 @@ func TestListTodosModifiedSinceScoped(t *testing.T) {
 	if err := c.SaveTodo(ctx, todoB); err != nil {
 		t.Fatalf("save list-b todo: %v", err)
 	}
+	t.Cleanup(func() { _ = c.DeleteTodo(ctx, userID, listB, todoB.ID) })
 
 	since := now.Add(-time.Minute).UTC().Format(time.RFC3339Nano)
 	todos, err := c.ListTodos(ctx, userID, listA, since, nil)
@@ -601,6 +644,7 @@ func TestListTodosModifiedSinceAndStatus(t *testing.T) {
 	userID, listID := uid(), uid()
 	now := time.Now().UTC()
 
+	var todoIDs []string
 	statuses := []models.TodoStatus{models.TodoPending, models.TodoDone, models.TodoPending}
 	for i, s := range statuses {
 		todo := &models.Todo{
@@ -611,7 +655,13 @@ func TestListTodosModifiedSinceAndStatus(t *testing.T) {
 		if err := c.SaveTodo(ctx, todo); err != nil {
 			t.Fatalf("save todo: %v", err)
 		}
+		todoIDs = append(todoIDs, todo.ID)
 	}
+	t.Cleanup(func() {
+		for _, id := range todoIDs {
+			_ = c.DeleteTodo(ctx, userID, listID, id)
+		}
+	})
 
 	since := now.Add(-time.Minute).UTC().Format(time.RFC3339Nano)
 	pending := models.TodoPending
@@ -638,6 +688,7 @@ func TestListTodosNoModifiedSince(t *testing.T) {
 
 	userID, listID := uid(), uid()
 	now := time.Now().UTC()
+	var todoIDs3 []string
 	for i := range 3 {
 		todo := &models.Todo{
 			ID: uid(), ListID: listID, UserID: userID,
@@ -647,7 +698,13 @@ func TestListTodosNoModifiedSince(t *testing.T) {
 		if err := c.SaveTodo(ctx, todo); err != nil {
 			t.Fatalf("save todo %d: %v", i, err)
 		}
+		todoIDs3 = append(todoIDs3, todo.ID)
 	}
+	t.Cleanup(func() {
+		for _, id := range todoIDs3 {
+			_ = c.DeleteTodo(ctx, userID, listID, id)
+		}
+	})
 	todos, err := c.ListTodos(ctx, userID, listID, "", nil)
 	if err != nil {
 		t.Fatalf("list todos: %v", err)
@@ -672,6 +729,7 @@ func TestLoadRefreshTokenNoAttribute(t *testing.T) {
 	if err := c.SaveUser(ctx, u); err != nil {
 		t.Fatalf("save user: %v", err)
 	}
+	t.Cleanup(func() { _ = c.DeleteUser(ctx, u.UserID) })
 	_, err := c.LoadRefreshToken(ctx, u.UserID)
 	if !errors.Is(err, db.ErrNoRefreshToken) {
 		t.Errorf("expected ErrNoRefreshToken, got %v", err)
@@ -692,6 +750,7 @@ func TestSaveUserPreservesRefreshToken(t *testing.T) {
 	if err := c.SaveUser(ctx, u); err != nil {
 		t.Fatalf("save user: %v", err)
 	}
+	t.Cleanup(func() { _ = c.DeleteUser(ctx, u.UserID) })
 	if err := c.SaveRefreshToken(ctx, u.UserID, "my-token"); err != nil {
 		t.Fatalf("save refresh token: %v", err)
 	}

@@ -312,6 +312,9 @@ func TestTokenEndpointRoundTrip(t *testing.T) {
 	if err := dbClient.SaveAuthCode(context.Background(), code, userID, redirectURI, 60*time.Second); err != nil {
 		t.Fatalf("save auth code: %v", err)
 	}
+	// Code is redeemed (deleted) by the handler on success; cleanup is a no-op in the happy path
+	// but guards against test failure before the redemption step.
+	t.Cleanup(func() { _, _ = dbClient.RedeemAuthCode(context.Background(), code) })
 
 	req := httptest.NewRequest("POST", "/auth/token",
 		strings.NewReader("grant_type=authorization_code&code="+code+"&redirect_uri="+redirectURI))
@@ -375,6 +378,7 @@ func TestTokenEndpointSingleUse(t *testing.T) {
 	if err := dbClient.SaveAuthCode(context.Background(), code, userID, redirectURI, 60*time.Second); err != nil {
 		t.Fatalf("save auth code: %v", err)
 	}
+	t.Cleanup(func() { _, _ = dbClient.RedeemAuthCode(context.Background(), code) })
 
 	body := strings.NewReader("grant_type=authorization_code&code=" + code + "&redirect_uri=" + redirectURI)
 	req := httptest.NewRequest("POST", "/auth/token", body)
@@ -406,6 +410,7 @@ func TestTokenEndpointRedirectURIMismatch(t *testing.T) {
 	if err := dbClient.SaveAuthCode(context.Background(), code, userID, "https://example.com/auth/callback", 60*time.Second); err != nil {
 		t.Fatalf("save auth code: %v", err)
 	}
+	t.Cleanup(func() { _, _ = dbClient.RedeemAuthCode(context.Background(), code) })
 
 	req := httptest.NewRequest("POST", "/auth/token",
 		strings.NewReader("grant_type=authorization_code&code="+code+"&redirect_uri=https://evil.com/steal"))
@@ -437,6 +442,7 @@ func TestTokenEndpointRedirectURIOmitted(t *testing.T) {
 	if err := dbClient.SaveAuthCode(context.Background(), code, userID, "https://example.com/auth/callback", 60*time.Second); err != nil {
 		t.Fatalf("save auth code: %v", err)
 	}
+	t.Cleanup(func() { _, _ = dbClient.RedeemAuthCode(context.Background(), code) })
 
 	req := httptest.NewRequest("POST", "/auth/token",
 		strings.NewReader("grant_type=authorization_code&code="+code))

@@ -119,7 +119,7 @@ func (h *Handler) userTools() []registeredTool {
 		{
 			def: toolDef{
 				Name:        "save_note",
-				Description: "Create or update a note. Omit note_id to create. On update, version must match the current stored version.",
+				Description: "Create or update a note. Omit note_id to create. On update, pass version = current + 1.",
 				InputSchema: schema{
 					Type:     "object",
 					Required: []string{"title", "content"},
@@ -128,7 +128,7 @@ func (h *Handler) userTools() []registeredTool {
 						"title":   {Type: "string", Description: "Note title."},
 						"content": {Type: "string", Description: "Note body (max 1MB)."},
 						"tags":    {Type: "array", Description: "Tag list.", Items: &items{Type: "string"}},
-						"version": {Type: "number", Description: "Current version for optimistic concurrency (omit when creating)."},
+						"version": {Type: "number", Description: "Next version to store (current + 1). Omit when creating or to skip conflict detection."},
 					},
 				},
 			},
@@ -173,7 +173,7 @@ func (h *Handler) userTools() []registeredTool {
 						"list_id": {Type: "string", Description: "List ID (omit to create)."},
 						"title":   {Type: "string", Description: "List title."},
 						"tags":    {Type: "array", Description: "Tag list.", Items: &items{Type: "string"}},
-						"version": {Type: "number", Description: "Current version for optimistic concurrency (omit when creating)."},
+						"version": {Type: "number", Description: "Next version to store (current + 1). Omit when creating or to skip conflict detection."},
 					},
 				},
 			},
@@ -288,14 +288,14 @@ func (h *Handler) userTools() []registeredTool {
 		{
 			def: toolDef{
 				Name:        "save_file",
-				Description: "Create or update a file. On update, version must match the current stored version.",
+				Description: "Create or update a file. On update, pass version = current + 1.",
 				InputSchema: schema{
 					Type:     "object",
 					Required: []string{"path", "content"},
 					Properties: map[string]property{
 						"path":    {Type: "string", Description: "File path."},
 						"content": {Type: "string", Description: "File content (max 1MB)."},
-						"version": {Type: "number", Description: "Current version for optimistic concurrency (omit when creating)."},
+						"version": {Type: "number", Description: "Next version to store (current + 1). Omit when creating or to skip conflict detection."},
 					},
 				},
 			},

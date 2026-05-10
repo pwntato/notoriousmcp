@@ -487,6 +487,7 @@ func saveIntegrationUser(t *testing.T, dbClient *db.Client, status models.UserSt
 	if err := dbClient.SaveUser(context.Background(), u); err != nil {
 		t.Fatalf("save user: %v", err)
 	}
+	t.Cleanup(func() { _ = dbClient.DeleteUser(context.Background(), userID) })
 	return u
 }
 
