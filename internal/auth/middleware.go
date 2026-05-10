@@ -175,6 +175,15 @@ func tryRefresh(ctx context.Context, cfg Config, dbClient *db.Client, rawToken s
 // exchangeGoogleRefreshToken performs a live token exchange with Google to
 // confirm the stored refresh token is still valid. It returns nil on success
 // and a non-nil error if Google rejects the token.
+//
+// The Google access token returned by src.Token() is intentionally discarded —
+// the exchange is performed only for liveness validation, not to obtain a
+// Google access token for API calls.
+//
+// Known gap: Google occasionally rotates refresh tokens, returning a new one
+// alongside the access token. That new token is not captured here, so the stored
+// DynamoDB value becomes stale after a rotation. In practice Google only rotates
+// for inactive tokens; regular callers see the same token indefinitely.
 func exchangeGoogleRefreshToken(ctx context.Context, cfg Config, refreshToken string) error {
 	endpoint := google.Endpoint
 	if cfg.GoogleTokenURL != "" {
