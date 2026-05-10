@@ -1212,6 +1212,62 @@ func TestIntegrationStorageCapEnforcedOnUpdate(t *testing.T) {
 	}
 }
 
+func TestIntegrationFileStorageCapEnforcedOnUpdate(t *testing.T) {
+	dbClient, storeClient := newTestClients(t)
+	user := saveIntegrationUser(t, dbClient, models.StatusUser)
+	// Cap is 50 bytes — enough for the initial save but not the larger update.
+	h := newIntegrationHandlerWithConfig(t, dbClient, storeClient, handlers.Config{
+		DefaultStorageCap:  50,
+		DefaultTransferCap: handlers.DefaultTransferCapBytes,
+	})
+
+	filePath := "test/cap-update-" + newTestUserID() + ".txt"
+
+	// Create a small file that fits under the cap.
+	resp := doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name": "save_file",
+		"arguments": map[string]any{
+			"path":    filePath,
+			"content": "small",
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("save_file (create): %+v", resp.Error)
+	}
+	var createResult struct{ IsError bool }
+	if err := json.Unmarshal(resp.Result, &createResult); err != nil {
+		t.Fatalf("unmarshal create: %v", err)
+	}
+	if createResult.IsError {
+		t.Fatalf("save_file (create) unexpectedly blocked: %s", firstContentText(t, resp.Result))
+	}
+	t.Cleanup(func() {
+		doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+			"name":      "delete_file",
+			"arguments": map[string]any{"path": filePath},
+		})
+	})
+
+	// Update with content large enough to push the total over the 50-byte cap.
+	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name": "save_file",
+		"arguments": map[string]any{
+			"path":    filePath,
+			"content": "this updated content is definitely more than fifty bytes total",
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("unexpected RPC error on update: %+v", resp.Error)
+	}
+	var updateResult struct{ IsError bool }
+	if err := json.Unmarshal(resp.Result, &updateResult); err != nil {
+		t.Fatalf("unmarshal update: %v", err)
+	}
+	if !updateResult.IsError {
+		t.Error("expected isError=true when file update pushes past storage cap")
+	}
+}
+
 func TestIntegrationPerUserTransferCapOverride(t *testing.T) {
 	dbClient, storeClient := newTestClients(t)
 	admin := saveIntegrationUser(t, dbClient, models.StatusAdmin)
