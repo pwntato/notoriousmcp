@@ -194,13 +194,6 @@ Set your AWS region if it's not already in your environment:
 export AWS_DEFAULT_REGION=us-east-1
 ```
 
-**OIDC provider caveat:** Terraform creates a GitHub OIDC provider (`aws_iam_openid_connect_provider`) in your account. If one already exists (e.g. from another project), the apply will fail with a duplicate resource error. Import it first:
-
-```bash
-terraform import aws_iam_openid_connect_provider.github \
-  arn:aws:iam::<YOUR_AWS_ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com
-```
-
 Initialize the backend:
 
 ```bash
@@ -210,6 +203,13 @@ terraform init \
   -backend-config="bucket=notoriousmcp-tfstate-<YOUR_AWS_ACCOUNT_ID>" \
   -backend-config="dynamodb_table=notoriousmcp-tfstate-<YOUR_AWS_ACCOUNT_ID>-lock" \
   -backend-config="region=us-east-1"
+```
+
+**OIDC provider caveat:** Terraform creates a GitHub OIDC provider in your account. If one already exists (e.g. from another project), `terraform apply` will fail with a duplicate resource error. Import it before applying:
+
+```bash
+terraform import aws_iam_openid_connect_provider.github \
+  arn:aws:iam::<YOUR_AWS_ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com
 ```
 
 > **Note:** The `redirect_url` below uses a placeholder because you don't have the CloudFront URL yet. You'll re-apply with the real URL after the first deploy.
@@ -239,6 +239,7 @@ Then:
      -var="google_client_secret=<CLIENT_SECRET>" \
      -var="admin_google_ids=<YOUR_GOOGLE_SUB>" \
      -var="redirect_url=https://<your-cloudfront-domain>/auth/callback"
+     # TF_VAR_token_secret is picked up from the env var set above
    ```
 3. Add `deploy_role_arn` as the `AWS_DEPLOY_ROLE_ARN` GitHub secret (Step 4)
 4. Add `REDIRECT_URL` and `TOKEN_SECRET` GitHub secrets with the real values
@@ -347,10 +348,8 @@ To load the skill file (teaches the LLM how to use the tools effectively), add i
 # Copy and fill in env vars
 cp .env.example .env
 
-# Start DynamoDB Local and MinIO
-docker compose up -d dynamodb minio
-
-# Run the local server (http://localhost:3000)
+# Start the local server (http://localhost:3000)
+# depends_on in docker-compose.yml starts DynamoDB Local and MinIO automatically
 docker compose up server
 ```
 
@@ -369,7 +368,7 @@ Add `http://localhost:3000/auth/callback` as an authorized redirect URI in your 
 **Run tests:**
 
 ```bash
-# Unit tests only
+# Unit tests only (integration tests are skipped when DYNAMODB_ENDPOINT is unset)
 go test ./...
 
 # Integration tests (requires running docker compose services)
