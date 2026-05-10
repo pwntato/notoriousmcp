@@ -7,6 +7,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/pwntato/notoriousmcp/internal/db"
 	"github.com/pwntato/notoriousmcp/internal/models"
 	"github.com/pwntato/notoriousmcp/internal/store"
 )
@@ -34,6 +35,19 @@ func (h *Handler) handleGetNote(ctx context.Context, user *models.User, args map
 		return dbErrResult(err)
 	}
 
+	// Read transfer usage once and reuse for both the pre-fetch and post-fetch checks.
+	transferUsedBefore, rpcErr := h.readTransferUsed(ctx, user)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+
+	// Pre-fetch cap check using the stored size. Skipped for pre-migration notes
+	// with Size==0 (those proceed to the post-fetch check below). This avoids an
+	// S3 fetch for users who are clearly over cap.
+	if note.Size > 0 && transferUsedBefore+note.Size > h.effectiveTransferCap(user) {
+		return dbErrResult(db.ErrTransferCap)
+	}
+
 	content, err := h.store.GetContent(ctx, note.S3Key)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -41,8 +55,24 @@ func (h *Handler) handleGetNote(ctx context.Context, user *models.User, args map
 		}
 		return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
 	}
+
 	note.Content = content
-	return jsonResult(note)
+	result, rpcErr := jsonResult(note)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+
+	// Post-fetch check and record using the actual serialized response size —
+	// the authoritative unit for both the cap check and the meter.
+	responseBytes := int64(len([]byte(result.Content[0].Text)))
+	if transferUsedBefore+responseBytes > h.effectiveTransferCap(user) {
+		return dbErrResult(db.ErrTransferCap)
+	}
+	if _, err := h.db.AddTransferUsed(ctx, user.UserID, currentMonth(), responseBytes, transferTTL()); err != nil {
+		log.Printf("mcp: get note %s: record transfer: %v", noteID, err)
+	}
+
+	return result, nil
 }
 
 func (h *Handler) handleSaveNote(ctx context.Context, user *models.User, args map[string]any) (*toolsCallResult, *rpcError) {
@@ -58,9 +88,16 @@ func (h *Handler) handleSaveNote(ctx context.Context, user *models.User, args ma
 	noteID := strArgOpt(args, "note_id")
 
 	now := time.Now().UTC()
+	newSize := int64(len([]byte(content)))
 	var note *models.Note
 
 	if noteID == "" {
+		// Create path. user.StorageUsedBytes is from auth middleware (request time)
+		// so concurrent saves can both pass this check; soft enforcement accepted.
+		if user.StorageUsedBytes+newSize > h.effectiveStorageCap(user) {
+			return dbErrResult(db.ErrStorageCap)
+		}
+
 		noteID = newID()
 		note = &models.Note{
 			ID:     noteID,
@@ -74,38 +111,13 @@ func (h *Handler) handleSaveNote(ctx context.Context, user *models.User, args ma
 			// The DB enforces attribute_not_exists on Version==1 writes, so
 			// concurrent creates for the same ID safely conflict at the DB layer.
 			S3Key:      fmt.Sprintf("notes/%s/%s", user.UserID, noteID),
+			Size:       newSize,
 			Version:    1,
 			CreatedAt:  now,
 			ModifiedAt: now,
 		}
-	} else {
-		existing, err := h.db.GetNote(ctx, user.UserID, noteID)
-		if err != nil {
-			return dbErrResult(err)
-		}
-		version := versionArg(args)
-		if version == 0 {
-			// version omitted: auto-increment bypasses optimistic concurrency.
-			// Callers that need conflict detection must pass the current version.
-			version = existing.Version + 1
-		}
-		note = &models.Note{
-			ID:     noteID,
-			UserID: user.UserID,
-			Title:  title,
-			Tags:   tags,
-			// Fresh S3 key per write: if the DB write fails (version conflict),
-			// the new S3 object is orphaned but the DB record still points to the
-			// previous key, so prior content is never overwritten.
-			S3Key:      fmt.Sprintf("notes/%s/%s/%s", user.UserID, noteID, newID()),
-			Version:    version,
-			CreatedAt:  existing.CreatedAt,
-			ModifiedAt: now,
-		}
 
-		// S3 write precedes DynamoDB write; on DB conflict the new S3 object is
-		// orphaned but the previous version's object is untouched (version-stamped
-		// keys ensure writes never overwrite earlier content).
+		// Create path: stable S3 key, no old object to clean up.
 		if err := h.store.PutContent(ctx, note.S3Key, content); err != nil {
 			if errors.Is(err, store.ErrTooLarge) {
 				return errorResult("content exceeds 1MB limit")
@@ -114,19 +126,59 @@ func (h *Handler) handleSaveNote(ctx context.Context, user *models.User, args ma
 		}
 
 		if err := h.db.SaveNote(ctx, note); err != nil {
+			// S3 object is orphaned (pre-existing behavior) and StorageUsedBytes
+			// is not incremented — intentional, the content wasn't committed.
 			return dbErrResult(err)
 		}
 
-		// DB write succeeded; delete the now-unreferenced previous S3 object.
-		// Log on failure but don't surface the error — the save already succeeded.
-		if err := h.store.DeleteContent(ctx, existing.S3Key); err != nil {
-			log.Printf("mcp: save note %s: cleanup old s3 key %s: %v", noteID, existing.S3Key, err)
+		if err := h.db.AddStorageUsed(ctx, user.UserID, newSize); err != nil {
+			log.Printf("mcp: save note %s: update storage used: %v", noteID, err)
 		}
 
 		return jsonResult(note)
 	}
 
-	// Create path: stable S3 key, no old object to clean up.
+	// Update path.
+	existing, err := h.db.GetNote(ctx, user.UserID, noteID)
+	if err != nil {
+		return dbErrResult(err)
+	}
+
+	oldSize := existing.Size
+	// Notes written before storage tracking was added have Size==0. On their
+	// first update delta = newSize (overcounts); on delete we subtract 0
+	// (undercounts). StorageUsedBytes is only accurate for items written after
+	// this feature was deployed — accepted for a soft cap.
+	delta := newSize - oldSize
+	// Same soft-enforcement trade-off as the create path above.
+	if delta > 0 && user.StorageUsedBytes+delta > h.effectiveStorageCap(user) {
+		return dbErrResult(db.ErrStorageCap)
+	}
+
+	version := versionArg(args)
+	if version == 0 {
+		// version omitted: auto-increment bypasses optimistic concurrency.
+		// Callers that need conflict detection must pass the current version.
+		version = existing.Version + 1
+	}
+	note = &models.Note{
+		ID:     noteID,
+		UserID: user.UserID,
+		Title:  title,
+		Tags:   tags,
+		// Fresh S3 key per write: if the DB write fails (version conflict),
+		// the new S3 object is orphaned but the DB record still points to the
+		// previous key, so prior content is never overwritten.
+		S3Key:      fmt.Sprintf("notes/%s/%s/%s", user.UserID, noteID, newID()),
+		Size:       newSize,
+		Version:    version,
+		CreatedAt:  existing.CreatedAt,
+		ModifiedAt: now,
+	}
+
+	// S3 write precedes DynamoDB write; on DB conflict the new S3 object is
+	// orphaned but the previous version's object is untouched (version-stamped
+	// keys ensure writes never overwrite earlier content).
 	if err := h.store.PutContent(ctx, note.S3Key, content); err != nil {
 		if errors.Is(err, store.ErrTooLarge) {
 			return errorResult("content exceeds 1MB limit")
@@ -136,6 +188,18 @@ func (h *Handler) handleSaveNote(ctx context.Context, user *models.User, args ma
 
 	if err := h.db.SaveNote(ctx, note); err != nil {
 		return dbErrResult(err)
+	}
+
+	// DB write succeeded; delete the now-unreferenced previous S3 object.
+	// Log on failure but don't surface the error — the save already succeeded.
+	if err := h.store.DeleteContent(ctx, existing.S3Key); err != nil {
+		log.Printf("mcp: save note %s: cleanup old s3 key %s: %v", noteID, existing.S3Key, err)
+	}
+
+	if delta != 0 {
+		if err := h.db.AddStorageUsed(ctx, user.UserID, delta); err != nil {
+			log.Printf("mcp: save note %s: update storage used: %v", noteID, err)
+		}
 	}
 
 	return jsonResult(note)
@@ -166,6 +230,12 @@ func (h *Handler) handleDeleteNote(ctx context.Context, user *models.User, args 
 	if err := h.store.DeleteContent(ctx, note.S3Key); err != nil {
 		log.Printf("mcp: delete note %s: s3 delete %s: %v", noteID, note.S3Key, err)
 		return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
+	}
+
+	if note.Size > 0 {
+		if err := h.db.AddStorageUsed(ctx, user.UserID, -note.Size); err != nil {
+			log.Printf("mcp: delete note %s: update storage used: %v", noteID, err)
+		}
 	}
 
 	return textResult("note deleted")

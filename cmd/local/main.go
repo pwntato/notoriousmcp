@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/pwntato/notoriousmcp/internal/auth"
+	"github.com/pwntato/notoriousmcp/internal/config"
 	"github.com/pwntato/notoriousmcp/internal/db"
 	"github.com/pwntato/notoriousmcp/internal/handlers"
 	"github.com/pwntato/notoriousmcp/internal/store"
@@ -42,7 +43,10 @@ func main() {
 	}
 
 	authHandler := auth.New(authCfg, dbClient)
-	mcpHandler := handlers.New(dbClient, storeClient)
+	mcpHandler := handlers.New(dbClient, storeClient, handlers.Config{
+		DefaultStorageCap:  config.Int64EnvOrDefault("DEFAULT_STORAGE_CAP_BYTES", handlers.DefaultStorageCapBytes),
+		DefaultTransferCap: config.Int64EnvOrDefault("DEFAULT_TRANSFER_CAP_BYTES", handlers.DefaultTransferCapBytes),
+	})
 
 	mux := http.NewServeMux()
 	authHandler.RegisterRoutes(mux)

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -22,16 +23,99 @@ const (
 	serverVersion      = "0.1.0"
 )
 
+const (
+	// DefaultStorageCapBytes is 1 GB — overridden by DEFAULT_STORAGE_CAP_BYTES env var.
+	DefaultStorageCapBytes int64 = 1 << 30
+	// DefaultTransferCapBytes is 1 GB/month — overridden by DEFAULT_TRANSFER_CAP_BYTES env var.
+	DefaultTransferCapBytes int64 = 1 << 30
+)
+
+// Config holds handler-level configuration (currently just default caps).
+type Config struct {
+	DefaultStorageCap  int64
+	DefaultTransferCap int64
+}
+
 // Handler is the MCP protocol handler.
 type Handler struct {
 	db    *db.Client
 	store *store.Client
+	cfg   Config
 }
 
 // New creates an MCP Handler. Passing nil for dbClient or storeClient is safe
 // only for unit tests that exercise code paths not reaching the DB or store.
-func New(dbClient *db.Client, storeClient *store.Client) *Handler {
-	return &Handler{db: dbClient, store: storeClient}
+func New(dbClient *db.Client, storeClient *store.Client, cfg Config) *Handler {
+	if cfg.DefaultStorageCap == 0 {
+		cfg.DefaultStorageCap = DefaultStorageCapBytes
+	}
+	if cfg.DefaultTransferCap == 0 {
+		cfg.DefaultTransferCap = DefaultTransferCapBytes
+	}
+	return &Handler{db: dbClient, store: storeClient, cfg: cfg}
+}
+
+// effectiveStorageCap returns the storage cap in bytes for a user, falling back
+// to the server default. A per-user cap of 0 blocks all writes — intentional.
+// Negative values can't be stored: handleUpdateUser passes nil to UpdateStorageCap
+// for values < 0 (clearing the override), so the DB attribute is always >= 0 or
+// absent. The clamp to 0 is purely defensive.
+func (h *Handler) effectiveStorageCap(u *models.User) int64 {
+	capBytes := h.cfg.DefaultStorageCap
+	if u.StorageCapBytes != nil {
+		capBytes = *u.StorageCapBytes
+	}
+	if capBytes < 0 {
+		return 0
+	}
+	return capBytes
+}
+
+// effectiveTransferCap returns the monthly transfer cap in bytes for a user,
+// falling back to the server default. Same semantics as effectiveStorageCap.
+func (h *Handler) effectiveTransferCap(u *models.User) int64 {
+	capBytes := h.cfg.DefaultTransferCap
+	if u.TransferCapBytes != nil {
+		capBytes = *u.TransferCapBytes
+	}
+	if capBytes < 0 {
+		return 0
+	}
+	return capBytes
+}
+
+// currentMonth returns the current UTC month in YYYY-MM format for transfer records.
+func currentMonth() string {
+	return time.Now().UTC().Format("2006-01")
+}
+
+// transferRecordTTL is how long monthly transfer records are retained. 60 days
+// ensures the previous month is always available for debugging while old records
+// auto-delete without a cron job.
+const transferRecordTTL = 60 * 24 * time.Hour
+
+// transferTTL returns a Unix timestamp transferRecordTTL from now, for use as
+// the DynamoDB TTL attribute on TRANSFER#YYYY-MM items.
+func transferTTL() int64 {
+	return time.Now().UTC().Add(transferRecordTTL).Unix()
+}
+
+// readTransferUsed returns the current month's transfer byte total for the user.
+// Callers fetch S3 content first, serialize the response, then call this and
+// compare the result against effectiveTransferCap to decide whether to block
+// (post-fetch by design: response size is only known after serialization).
+//
+// The read-check-increment is not atomic: two concurrent requests can both pass
+// the cap check and both record transfer, exceeding the cap by up to one
+// response's worth of bytes. This is accepted as soft enforcement — the cap is
+// an abuse guard, not a hard billing limit.
+func (h *Handler) readTransferUsed(ctx context.Context, user *models.User) (int64, *rpcError) {
+	used, err := h.db.GetTransferUsed(ctx, user.UserID, currentMonth())
+	if err != nil {
+		log.Printf("mcp: get transfer used for %s: %v", user.UserID, err)
+		return 0, &rpcError{Code: codeInternalError, Message: "internal error"}
+	}
+	return used, nil
 }
 
 // RegisterRoutes wires the MCP endpoint onto the given mux.
@@ -218,6 +302,8 @@ func errorResult(text string) (*toolsCallResult, *rpcError) {
 }
 
 // jsonResult serialises v as pretty JSON inside an MCP content block.
+// Always returns exactly one content item — callers that index Content[0]
+// directly (e.g. to measure response size) are safe to do so.
 func jsonResult(v any) (*toolsCallResult, *rpcError) {
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
@@ -313,6 +399,28 @@ func newID() string {
 	return hex.EncodeToString(b)
 }
 
+// int64ArgOpt reads an optional numeric argument as int64.
+// Returns (value, true, nil) if present and valid.
+// Returns (0, false, nil) if absent.
+// Returns (0, true, err) if present but not a recognized numeric type — callers
+// should surface this as an invalid-params error for security-relevant fields.
+func int64ArgOpt(args map[string]any, key string) (int64, bool, error) {
+	v, ok := args[key]
+	if !ok {
+		return 0, false, nil
+	}
+	switch n := v.(type) {
+	case float64:
+		return int64(n), true, nil
+	case int64:
+		return n, true, nil
+	case int:
+		return int64(n), true, nil
+	default:
+		return 0, true, fmt.Errorf("argument %q must be a number, got %T", key, v)
+	}
+}
+
 // versionArg reads the optional "version" argument as int.
 func versionArg(args map[string]any) int {
 	v, ok := args["version"]
@@ -335,6 +443,12 @@ func dbErrResult(err error) (*toolsCallResult, *rpcError) {
 	}
 	if errors.Is(err, db.ErrVersionConflict) {
 		return errorResult("version conflict: reload and retry")
+	}
+	if errors.Is(err, db.ErrStorageCap) {
+		return errorResult("Storage cap reached. Contact your administrator to adjust your cap.")
+	}
+	if errors.Is(err, db.ErrTransferCap) {
+		return errorResult("Monthly transfer cap reached. Contact your administrator to adjust your cap.")
 	}
 	log.Printf("mcp: db error: %v", err)
 	return nil, &rpcError{Code: codeInternalError, Message: "internal error"}

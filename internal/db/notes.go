@@ -22,6 +22,7 @@ type noteRecord struct {
 	Title      string   `dynamodbav:"Title"`
 	Tags       []string `dynamodbav:"Tags"`
 	S3Key      string   `dynamodbav:"S3Key"`
+	Size       int64    `dynamodbav:"Size"`
 	Version    int      `dynamodbav:"Version"`
 	CreatedAt  string   `dynamodbav:"CreatedAt"`
 	ModifiedAt string   `dynamodbav:"ModifiedAt"`
@@ -63,6 +64,7 @@ func (c *Client) SaveNote(ctx context.Context, n *models.Note) error {
 			"UserID":     &types.AttributeValueMemberS{Value: n.UserID},
 			"Title":      &types.AttributeValueMemberS{Value: n.Title},
 			"S3Key":      &types.AttributeValueMemberS{Value: n.S3Key},
+			"Size":       &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", n.Size)},
 			"Version":    &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", n.Version)},
 			"CreatedAt":  &types.AttributeValueMemberS{Value: n.CreatedAt.UTC().Format(isoFormat)},
 			"ModifiedAt": &types.AttributeValueMemberS{Value: modAt},
@@ -154,6 +156,7 @@ func noteFromItem(item map[string]types.AttributeValue) (*models.Note, error) {
 		Title:   rec.Title,
 		Tags:    rec.Tags,
 		S3Key:   rec.S3Key,
+		Size:    rec.Size,
 		Version: rec.Version,
 	}
 	var err error

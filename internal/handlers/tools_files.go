@@ -53,6 +53,18 @@ func (h *Handler) handleGetFile(ctx context.Context, user *models.User, args map
 		return dbErrResult(err)
 	}
 
+	// Pre-fetch cap check using f.Size (always accurate for files). Avoids an S3
+	// fetch for users who are clearly over cap. The post-fetch check uses the
+	// serialized response size as the metered unit; the pre-fetch check is a
+	// best-effort fast-path that may slightly undercount JSON overhead.
+	transferUsedBefore, rpcErr := h.readTransferUsed(ctx, user)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	if transferUsedBefore+f.Size > h.effectiveTransferCap(user) {
+		return dbErrResult(db.ErrTransferCap)
+	}
+
 	content, err := h.store.GetContent(ctx, f.S3Key)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -61,7 +73,21 @@ func (h *Handler) handleGetFile(ctx context.Context, user *models.User, args map
 		return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
 	}
 	f.Content = content
-	return jsonResult(f)
+	result, rpcErr := jsonResult(f)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+
+	// Post-fetch check and record using the actual serialized response size.
+	responseBytes := int64(len([]byte(result.Content[0].Text)))
+	if transferUsedBefore+responseBytes > h.effectiveTransferCap(user) {
+		return dbErrResult(db.ErrTransferCap)
+	}
+	if _, err := h.db.AddTransferUsed(ctx, user.UserID, currentMonth(), responseBytes, transferTTL()); err != nil {
+		log.Printf("mcp: get file %s: record transfer: %v", filePath, err)
+	}
+
+	return result, nil
 }
 
 func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args map[string]any) (*toolsCallResult, *rpcError) {
@@ -80,6 +106,7 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 	}
 
 	now := time.Now().UTC()
+	newSize := int64(len([]byte(content)))
 	var f *models.File
 
 	existing, dbErr := h.db.GetFile(ctx, user.UserID, filePath)
@@ -89,13 +116,19 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 	// existing is nil iff GetFile returned ErrNotFound; the block below always returns,
 	// so all code after it can safely dereference existing.
 	if existing == nil {
+		// user.StorageUsedBytes is from auth middleware (request time);
+		// concurrent saves can both pass this check — soft enforcement accepted.
+		if user.StorageUsedBytes+newSize > h.effectiveStorageCap(user) {
+			return dbErrResult(db.ErrStorageCap)
+		}
+
 		f = &models.File{
 			Path:   filePath,
 			UserID: user.UserID,
 			// Same stable-key-on-create trade-off as handleSaveNote; DB enforces
 			// attribute_not_exists on Version==1 writes.
 			S3Key:      fmt.Sprintf("files/%s/%s/%s", user.UserID, filePath, newID()),
-			Size:       int64(len([]byte(content))),
+			Size:       newSize,
 			Version:    1,
 			CreatedAt:  now,
 			ModifiedAt: now,
@@ -110,10 +143,25 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 		}
 
 		if err := h.db.SaveFile(ctx, f); err != nil {
+			// S3 object is orphaned (pre-existing behavior) and StorageUsedBytes
+			// is not incremented — intentional, the content wasn't committed.
 			return dbErrResult(err)
 		}
 
+		if err := h.db.AddStorageUsed(ctx, user.UserID, newSize); err != nil {
+			log.Printf("mcp: save file %s: update storage used: %v", filePath, err)
+		}
+
 		return jsonResult(f)
+	}
+
+	// Files written before storage tracking was added have Size==0. Same
+	// migration trade-off as handleSaveNote: first-update overcounts, delete
+	// of a never-updated old file undercounts. Accepted for a soft cap.
+	delta := newSize - existing.Size
+	// Same soft-enforcement trade-off as the create path above.
+	if delta > 0 && user.StorageUsedBytes+delta > h.effectiveStorageCap(user) {
+		return dbErrResult(db.ErrStorageCap)
 	}
 
 	version := versionArg(args)
@@ -127,7 +175,7 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 		UserID: user.UserID,
 		// Fresh S3 key per write: same rationale as handleSaveNote.
 		S3Key:      fmt.Sprintf("files/%s/%s/%s", user.UserID, filePath, newID()),
-		Size:       int64(len([]byte(content))),
+		Size:       newSize,
 		Version:    version,
 		CreatedAt:  existing.CreatedAt,
 		ModifiedAt: now,
@@ -150,6 +198,12 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 	// Log on failure but don't surface the error — the save already succeeded.
 	if err := h.store.DeleteContent(ctx, existing.S3Key); err != nil {
 		log.Printf("mcp: save file %s: cleanup old s3 key %s: %v", filePath, existing.S3Key, err)
+	}
+
+	if delta != 0 {
+		if err := h.db.AddStorageUsed(ctx, user.UserID, delta); err != nil {
+			log.Printf("mcp: save file %s: update storage used: %v", filePath, err)
+		}
 	}
 
 	return jsonResult(f)
@@ -180,6 +234,12 @@ func (h *Handler) handleDeleteFile(ctx context.Context, user *models.User, args 
 	if err := h.store.DeleteContent(ctx, f.S3Key); err != nil {
 		log.Printf("mcp: delete file %s: s3 delete %s: %v", filePath, f.S3Key, err)
 		return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
+	}
+
+	if f.Size > 0 {
+		if err := h.db.AddStorageUsed(ctx, user.UserID, -f.Size); err != nil {
+			log.Printf("mcp: delete file %s: update storage used: %v", filePath, err)
+		}
 	}
 
 	return textResult("file deleted")
