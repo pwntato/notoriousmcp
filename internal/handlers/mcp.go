@@ -57,8 +57,9 @@ func New(dbClient *db.Client, storeClient *store.Client, cfg Config) *Handler {
 
 // effectiveStorageCap returns the storage cap in bytes for a user, falling back
 // to the server default. A per-user cap of 0 blocks all writes — intentional.
-// Negative values can't be stored (handleUpdateUser rejects them via the >= 0
-// guard), but clamp to 0 defensively so the > comparison stays correct.
+// Negative values can't be stored: handleUpdateUser passes nil to UpdateStorageCap
+// for values < 0 (clearing the override), so the DB attribute is always >= 0 or
+// absent. The clamp to 0 is purely defensive.
 func (h *Handler) effectiveStorageCap(u *models.User) int64 {
 	capBytes := h.cfg.DefaultStorageCap
 	if u.StorageCapBytes != nil {

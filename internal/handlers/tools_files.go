@@ -136,6 +136,8 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 		}
 
 		if err := h.db.SaveFile(ctx, f); err != nil {
+			// S3 object is orphaned (pre-existing behavior) and StorageUsedBytes
+			// is not incremented — intentional, the content wasn't committed.
 			return dbErrResult(err)
 		}
 

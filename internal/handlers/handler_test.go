@@ -912,6 +912,70 @@ func TestIntegrationFileStorageCapEnforced(t *testing.T) {
 	}
 }
 
+func TestIntegrationStorageDecrementedOnDelete(t *testing.T) {
+	dbClient, storeClient := newTestClients(t)
+	admin := saveIntegrationUser(t, dbClient, models.StatusAdmin)
+	user := saveIntegrationUser(t, dbClient, models.StatusUser)
+	h := newIntegrationHandler(t, dbClient, storeClient)
+
+	// Save a note to establish some storage usage.
+	resp := doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name": "save_note",
+		"arguments": map[string]any{
+			"title":   "Delete Decrement Test",
+			"content": "some content",
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("save_note: %+v", resp.Error)
+	}
+	noteID := extractField(t, resp.Result, "id")
+
+	// Capture storage usage after save via list_users.
+	usageBefore := getStorageUsedPct(t, h, admin.UserID, user.UserID)
+
+	// Delete the note.
+	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name":      "delete_note",
+		"arguments": map[string]any{"note_id": noteID},
+	})
+	if resp.Error != nil {
+		t.Fatalf("delete_note: %+v", resp.Error)
+	}
+
+	// Storage usage should be lower (or zero) after delete.
+	usageAfter := getStorageUsedPct(t, h, admin.UserID, user.UserID)
+	if usageAfter >= usageBefore {
+		t.Errorf("storage_used_pct: want < %d after delete, got %d", usageBefore, usageAfter)
+	}
+}
+
+// getStorageUsedPct returns the storage_used_pct for targetUserID from list_users.
+func getStorageUsedPct(t *testing.T, h http.Handler, adminUserID, targetUserID string) int {
+	t.Helper()
+	resp := doIntegrationRequest(t, h, adminUserID, "tools/call", map[string]any{
+		"name":      "list_users",
+		"arguments": map[string]any{},
+	})
+	if resp.Error != nil {
+		t.Fatalf("list_users: %+v", resp.Error)
+	}
+	text := firstContentText(t, resp.Result)
+	var users []map[string]any
+	if err := json.Unmarshal([]byte(text), &users); err != nil {
+		t.Fatalf("unmarshal users: %v", err)
+	}
+	for _, u := range users {
+		if u["user_id"] == targetUserID {
+			if pct, ok := u["storage_used_pct"].(float64); ok {
+				return int(pct)
+			}
+		}
+	}
+	t.Fatalf("user %s not found in list_users", targetUserID)
+	return 0
+}
+
 func TestIntegrationTransferCapEnforced(t *testing.T) {
 	dbClient, storeClient := newTestClients(t)
 	user := saveIntegrationUser(t, dbClient, models.StatusUser)

@@ -117,6 +117,8 @@ func (h *Handler) handleSaveNote(ctx context.Context, user *models.User, args ma
 		}
 
 		if err := h.db.SaveNote(ctx, note); err != nil {
+			// S3 object is orphaned (pre-existing behavior) and StorageUsedBytes
+			// is not incremented — intentional, the content wasn't committed.
 			return dbErrResult(err)
 		}
 
