@@ -76,8 +76,15 @@ func (h *Handler) handleListUsers(ctx context.Context, args map[string]any) (*to
 	}
 	wg.Wait()
 	close(errc)
+	// Drain all errors — multiple goroutines may have failed.
+	var firstErr error
 	for err := range errc {
 		log.Printf("admin: list users: %v", err)
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	if firstErr != nil {
 		return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
 	}
 	return jsonResult(out)

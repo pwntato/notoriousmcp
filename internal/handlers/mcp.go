@@ -302,6 +302,8 @@ func errorResult(text string) (*toolsCallResult, *rpcError) {
 }
 
 // jsonResult serialises v as pretty JSON inside an MCP content block.
+// Always returns exactly one content item — callers that index Content[0]
+// directly (e.g. to measure response size) are safe to do so.
 func jsonResult(v any) (*toolsCallResult, *rpcError) {
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {

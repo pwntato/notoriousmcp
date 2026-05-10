@@ -1009,6 +1009,51 @@ func TestIntegrationTransferCapEnforced(t *testing.T) {
 	}
 }
 
+func TestIntegrationFileTransferCapEnforced(t *testing.T) {
+	dbClient, storeClient := newTestClients(t)
+	user := saveIntegrationUser(t, dbClient, models.StatusUser)
+	// Transfer cap is 1 byte — any real get response will exceed it.
+	h := newIntegrationHandlerWithConfig(t, dbClient, storeClient, handlers.Config{
+		DefaultStorageCap:  handlers.DefaultStorageCapBytes,
+		DefaultTransferCap: 1,
+	})
+
+	// Create a file (doesn't hit transfer cap).
+	filePath := "test/transfer-cap-" + newTestUserID() + ".txt"
+	resp := doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name": "save_file",
+		"arguments": map[string]any{
+			"path":    filePath,
+			"content": "hello",
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("save_file: %+v", resp.Error)
+	}
+	t.Cleanup(func() {
+		doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+			"name":      "delete_file",
+			"arguments": map[string]any{"path": filePath},
+		})
+	})
+
+	// get_file must be blocked by the transfer cap.
+	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
+		"name":      "get_file",
+		"arguments": map[string]any{"path": filePath},
+	})
+	if resp.Error != nil {
+		t.Fatalf("unexpected RPC error: %+v", resp.Error)
+	}
+	var result struct{ IsError bool }
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !result.IsError {
+		t.Error("expected isError=true when file transfer cap exceeded")
+	}
+}
+
 func TestIntegrationUsageVisibleInListUsers(t *testing.T) {
 	dbClient, storeClient := newTestClients(t)
 	admin := saveIntegrationUser(t, dbClient, models.StatusAdmin)
