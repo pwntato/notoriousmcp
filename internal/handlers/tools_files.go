@@ -53,6 +53,18 @@ func (h *Handler) handleGetFile(ctx context.Context, user *models.User, args map
 		return dbErrResult(err)
 	}
 
+	// Pre-fetch cap check using f.Size (always accurate for files). Avoids an S3
+	// fetch for users who are clearly over cap. The post-fetch check uses the
+	// serialized response size as the metered unit; the pre-fetch check is a
+	// best-effort fast-path that may slightly undercount JSON overhead.
+	transferUsedBefore, rpcErr := h.readTransferUsed(ctx, user)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	if transferUsedBefore+f.Size > h.effectiveTransferCap(user) {
+		return dbErrResult(db.ErrTransferCap)
+	}
+
 	content, err := h.store.GetContent(ctx, f.S3Key)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -66,13 +78,8 @@ func (h *Handler) handleGetFile(ctx context.Context, user *models.User, args map
 		return nil, rpcErr
 	}
 
-	// Check and record transfer using the actual response size so both sides
-	// of the enforcement use the same unit.
+	// Post-fetch check and record using the actual serialized response size.
 	responseBytes := int64(len([]byte(result.Content[0].Text)))
-	transferUsedBefore, rpcErr := h.readTransferUsed(ctx, user)
-	if rpcErr != nil {
-		return nil, rpcErr
-	}
 	if transferUsedBefore+responseBytes > h.effectiveTransferCap(user) {
 		return dbErrResult(db.ErrTransferCap)
 	}

@@ -914,16 +914,17 @@ func TestIntegrationFileStorageCapEnforced(t *testing.T) {
 
 func TestIntegrationStorageDecrementedOnDelete(t *testing.T) {
 	dbClient, storeClient := newTestClients(t)
-	admin := saveIntegrationUser(t, dbClient, models.StatusAdmin)
 	user := saveIntegrationUser(t, dbClient, models.StatusUser)
 	h := newIntegrationHandler(t, dbClient, storeClient)
+
+	content := "some content for delete decrement test"
 
 	// Save a note to establish some storage usage.
 	resp := doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
 		"name": "save_note",
 		"arguments": map[string]any{
 			"title":   "Delete Decrement Test",
-			"content": "some content",
+			"content": content,
 		},
 	})
 	if resp.Error != nil {
@@ -931,8 +932,16 @@ func TestIntegrationStorageDecrementedOnDelete(t *testing.T) {
 	}
 	noteID := extractField(t, resp.Result, "id")
 
-	// Capture storage usage after save via list_users.
-	usageBefore := getStorageUsedPct(t, h, admin.UserID, user.UserID)
+	// Capture the raw StorageUsedBytes from DynamoDB directly — avoids the
+	// integer-percentage resolution loss at 1GB default cap scale.
+	u, err := dbClient.GetUser(context.Background(), user.UserID)
+	if err != nil {
+		t.Fatalf("get user after save: %v", err)
+	}
+	usedAfterSave := u.StorageUsedBytes
+	if usedAfterSave == 0 {
+		t.Fatal("StorageUsedBytes is 0 after save_note — accounting not working")
+	}
 
 	// Delete the note.
 	resp = doIntegrationRequest(t, h, user.UserID, "tools/call", map[string]any{
@@ -943,37 +952,14 @@ func TestIntegrationStorageDecrementedOnDelete(t *testing.T) {
 		t.Fatalf("delete_note: %+v", resp.Error)
 	}
 
-	// Storage usage should be lower (or zero) after delete.
-	usageAfter := getStorageUsedPct(t, h, admin.UserID, user.UserID)
-	if usageAfter >= usageBefore {
-		t.Errorf("storage_used_pct: want < %d after delete, got %d", usageBefore, usageAfter)
+	// StorageUsedBytes should be back to 0 (only note for this user).
+	u, err = dbClient.GetUser(context.Background(), user.UserID)
+	if err != nil {
+		t.Fatalf("get user after delete: %v", err)
 	}
-}
-
-// getStorageUsedPct returns the storage_used_pct for targetUserID from list_users.
-func getStorageUsedPct(t *testing.T, h http.Handler, adminUserID, targetUserID string) int {
-	t.Helper()
-	resp := doIntegrationRequest(t, h, adminUserID, "tools/call", map[string]any{
-		"name":      "list_users",
-		"arguments": map[string]any{},
-	})
-	if resp.Error != nil {
-		t.Fatalf("list_users: %+v", resp.Error)
+	if u.StorageUsedBytes != 0 {
+		t.Errorf("StorageUsedBytes: want 0 after delete, got %d", u.StorageUsedBytes)
 	}
-	text := firstContentText(t, resp.Result)
-	var users []map[string]any
-	if err := json.Unmarshal([]byte(text), &users); err != nil {
-		t.Fatalf("unmarshal users: %v", err)
-	}
-	for _, u := range users {
-		if u["user_id"] == targetUserID {
-			if pct, ok := u["storage_used_pct"].(float64); ok {
-				return int(pct)
-			}
-		}
-	}
-	t.Fatalf("user %s not found in list_users", targetUserID)
-	return 0
 }
 
 func TestIntegrationTransferCapEnforced(t *testing.T) {

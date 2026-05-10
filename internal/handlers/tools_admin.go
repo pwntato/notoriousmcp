@@ -90,9 +90,16 @@ func (h *Handler) handleUpdateUser(ctx context.Context, caller *models.User, arg
 	}
 
 	// Validate that at least one field is being changed before touching the DB.
+	// Also pre-validate cap types — bad types return -32602 rather than being ignored.
 	statusStr := strArgOpt(args, "status")
-	_, hasStorage := int64ArgOpt(args, "storage_cap_bytes")
-	_, hasTransfer := int64ArgOpt(args, "transfer_cap_bytes")
+	storageCap, hasStorage, storageErr := int64ArgOpt(args, "storage_cap_bytes")
+	transferCap, hasTransfer, transferErr := int64ArgOpt(args, "transfer_cap_bytes")
+	if storageErr != nil {
+		return nil, &rpcError{Code: codeInvalidParams, Message: storageErr.Error()}
+	}
+	if transferErr != nil {
+		return nil, &rpcError{Code: codeInvalidParams, Message: transferErr.Error()}
+	}
 	if statusStr == "" && !hasStorage && !hasTransfer {
 		return nil, &rpcError{Code: codeInvalidParams, Message: "at least one of status, storage_cap_bytes, or transfer_cap_bytes must be provided"}
 	}
@@ -121,7 +128,7 @@ func (h *Handler) handleUpdateUser(ctx context.Context, caller *models.User, arg
 
 	// Optional cap overrides. Each field is independent: omit to leave unchanged,
 	// pass -1 to clear the per-user override and restore the server default.
-	if storageCap, ok := int64ArgOpt(args, "storage_cap_bytes"); ok {
+	if hasStorage {
 		var capPtr *int64
 		if storageCap >= 0 {
 			capPtr = &storageCap
@@ -134,7 +141,7 @@ func (h *Handler) handleUpdateUser(ctx context.Context, caller *models.User, arg
 			return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
 		}
 	}
-	if transferCap, ok := int64ArgOpt(args, "transfer_cap_bytes"); ok {
+	if hasTransfer {
 		var capPtr *int64
 		if transferCap >= 0 {
 			capPtr = &transferCap

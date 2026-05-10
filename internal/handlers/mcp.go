@@ -397,27 +397,25 @@ func newID() string {
 	return hex.EncodeToString(b)
 }
 
-// int64ArgOpt reads an optional numeric argument as int64, returning (0, false)
-// if absent. Returns (value, true) if present; caller should pass -1 to mean
-// "clear the cap" so that 0 is distinguishable from "not provided".
-// Logs a warning and returns (0, false) if the field is present but not a
-// recognized numeric type — treats it the same as absent rather than erroring,
-// matching the soft-validation style of other optional args.
-func int64ArgOpt(args map[string]any, key string) (int64, bool) {
+// int64ArgOpt reads an optional numeric argument as int64.
+// Returns (value, true, nil) if present and valid.
+// Returns (0, false, nil) if absent.
+// Returns (0, true, err) if present but not a recognized numeric type — callers
+// should surface this as an invalid-params error for security-relevant fields.
+func int64ArgOpt(args map[string]any, key string) (int64, bool, error) {
 	v, ok := args[key]
 	if !ok {
-		return 0, false
+		return 0, false, nil
 	}
 	switch n := v.(type) {
 	case float64:
-		return int64(n), true
+		return int64(n), true, nil
 	case int64:
-		return n, true
+		return n, true, nil
 	case int:
-		return int64(n), true
+		return int64(n), true, nil
 	default:
-		log.Printf("mcp: arg %q: unexpected type %T, ignoring", key, v)
-		return 0, false
+		return 0, true, fmt.Errorf("argument %q must be a number, got %T", key, v)
 	}
 }
 
