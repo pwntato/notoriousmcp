@@ -14,6 +14,9 @@ type Config struct {
 	// running behind a trusted reverse proxy (CloudFront/ALB). Never set on
 	// direct-to-internet deployments — it allows scheme downgrade spoofing.
 	TrustProxy bool
+	// GoogleTokenURL overrides Google's token endpoint. Empty means use the
+	// default (google.Endpoint). Set in tests only to point at a fake server.
+	GoogleTokenURL string
 }
 
 // Validate returns an error if any required field is missing or too short.
