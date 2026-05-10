@@ -109,6 +109,8 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 	// existing is nil iff GetFile returned ErrNotFound; the block below always returns,
 	// so all code after it can safely dereference existing.
 	if existing == nil {
+		// user.StorageUsedBytes is from auth middleware (request time);
+		// concurrent saves can both pass this check — soft enforcement accepted.
 		if user.StorageUsedBytes+newSize > h.effectiveStorageCap(user) {
 			return dbErrResult(db.ErrStorageCap)
 		}
@@ -145,6 +147,7 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 	}
 
 	delta := newSize - existing.Size
+	// Same soft-enforcement trade-off as the create path above.
 	if delta > 0 && user.StorageUsedBytes+delta > h.effectiveStorageCap(user) {
 		return dbErrResult(db.ErrStorageCap)
 	}

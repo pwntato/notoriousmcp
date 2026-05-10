@@ -55,20 +55,32 @@ func New(dbClient *db.Client, storeClient *store.Client, cfg Config) *Handler {
 	return &Handler{db: dbClient, store: storeClient, cfg: cfg}
 }
 
-// effectiveStorageCap returns the cap in bytes for a user, falling back to the default.
+// effectiveStorageCap returns the storage cap in bytes for a user, falling back
+// to the server default. A cap of 0 (set explicitly via update_user) blocks all
+// writes — this is intentional. A negative value is clamped to 1 to avoid
+// arithmetic confusion; negative caps should never be stored but guard anyway.
 func (h *Handler) effectiveStorageCap(u *models.User) int64 {
+	cap := h.cfg.DefaultStorageCap
 	if u.StorageCapBytes != nil {
-		return *u.StorageCapBytes
+		cap = *u.StorageCapBytes
 	}
-	return h.cfg.DefaultStorageCap
+	if cap < 0 {
+		return 1
+	}
+	return cap
 }
 
-// effectiveTransferCap returns the monthly transfer cap in bytes, falling back to the default.
+// effectiveTransferCap returns the monthly transfer cap in bytes for a user,
+// falling back to the server default. Same zero/negative semantics as effectiveStorageCap.
 func (h *Handler) effectiveTransferCap(u *models.User) int64 {
+	cap := h.cfg.DefaultTransferCap
 	if u.TransferCapBytes != nil {
-		return *u.TransferCapBytes
+		cap = *u.TransferCapBytes
 	}
-	return h.cfg.DefaultTransferCap
+	if cap < 0 {
+		return 1
+	}
+	return cap
 }
 
 // currentMonth returns the current UTC month in YYYY-MM format for transfer records.
