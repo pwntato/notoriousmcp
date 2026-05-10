@@ -66,7 +66,7 @@ For a personal or small-team deployment with light usage (a few hundred MCP call
 | DynamoDB | On-demand reads/writes at low volume | < $0.01 |
 | S3 | Storage + requests for note/file content | < $0.10 |
 | CloudFront | Data transfer + HTTPS requests | ~$0.10 |
-| SSM Parameter Store | 4 SecureString parameters | ~$0.80 |
+| SSM Parameter Store | 4 SecureString parameters | ~$0.20 |
 | CloudWatch Logs | Lambda log ingestion (14-day retention) | ~$0.10 |
 
 SSM SecureString is the dominant cost — $0.05/parameter/month × 4 parameters = $0.20, plus $0.05 per 10,000 API calls (fetched at each cold start). At typical Lambda cold start rates the call cost is negligible.
@@ -267,7 +267,7 @@ terraform apply \
   -var="domain_contact_country_code=US" \
   -var="domain_contact_phone=+1.5555550100" \
   -var="domain_contact_email=you@example.com"
-  # TF_VAR_token_secret picked up from env
+  # TF_VAR_token_secret is picked up from the env var set above
 ```
 
 This registers the domain via Route53 and wires ACM + CloudFront automatically. Update your `REDIRECT_URL` GitHub secret and Google OAuth redirect URI to use the custom domain.
@@ -320,7 +320,7 @@ Add to your MCP client config (e.g. Claude Code's `.claude/settings.json`):
 
 To get a token:
 1. Visit `https://<your-cloudfront-domain>/auth/login` in a browser
-2. Complete the Google OAuth flow — you'll be redirected back with a short-lived exchange code
+2. Complete the Google OAuth flow — you'll be redirected back to your redirect URI with `?code=<exchange-code>` appended to the URL. Copy that value.
 3. POST the exchange code to get a Bearer token. The `redirect_uri` must exactly match the one registered in Google Cloud Console (same as your `REDIRECT_URL` secret):
    ```bash
    curl -X POST https://<your-cloudfront-domain>/auth/token \
