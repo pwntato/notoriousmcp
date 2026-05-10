@@ -12,6 +12,7 @@ A self-hosted MCP (Model Context Protocol) server for notes, todo lists, files, 
 ## Table of Contents
 
 - [Architecture](#architecture)
+- [Cost Estimate](#cost-estimate)
 - [Prerequisites](#prerequisites)
 - [Step 1 — Google OAuth Credentials](#step-1--google-oauth-credentials)
 - [Step 2 — Bootstrap Terraform State](#step-2--bootstrap-terraform-state)
@@ -55,11 +56,30 @@ New accounts start as **pending** and can only call `check_status`. An admin mus
 
 ---
 
+## Cost Estimate
+
+For a personal or small-team deployment with light usage (a few hundred MCP calls/day), AWS costs are roughly **$1–2/month**:
+
+| Service | What you're paying for | Est. monthly cost |
+|---------|------------------------|-------------------|
+| Lambda | Invocations + duration (256MB arm64, ~100ms/call) | < $0.01 |
+| DynamoDB | On-demand reads/writes at low volume | < $0.01 |
+| S3 | Storage + requests for note/file content | < $0.10 |
+| CloudFront | Data transfer + HTTPS requests | ~$0.10 |
+| SSM Parameter Store | 4 SecureString parameters | ~$0.80 |
+| CloudWatch Logs | Lambda log ingestion (14-day retention) | ~$0.10 |
+
+SSM SecureString is the dominant cost — $0.05/parameter/month × 4 parameters = $0.20, plus $0.05 per 10,000 API calls (fetched at each cold start). At typical Lambda cold start rates the call cost is negligible.
+
+All other services are effectively free at personal-use scale. The AWS Free Tier covers Lambda, DynamoDB, and S3 for the first 12 months.
+
+---
+
 ## Prerequisites
 
 - AWS account with permissions to create Lambda, DynamoDB, S3, CloudFront, SSM, IAM, and (optionally) Route53 resources
 - Terraform ≥ 1.0
-- Go ≥ 1.21 (for local builds)
+- Go ≥ 1.26 (see `go.mod`; for local builds only — CI builds in GitHub Actions)
 - GitHub repository (for OIDC-based CI/CD)
 - A Google account (for OAuth)
 
@@ -118,10 +138,10 @@ The admin bootstrap requires your Google **subject ID** (`sub`) — a numeric st
 
 **Option B — after first deploy** (if you skip this step now):
 
-Log in once via `/auth/login`, then scan DynamoDB:
+Log in once via `/auth/login`, then scan DynamoDB (user records have `SK = "PROFILE"`):
 ```bash
 aws dynamodb scan --table-name notoriousmcp \
-  | jq -r '.Items[] | select(.SK.S == "USER") | {id: .PK.S, email: .Email.S}'
+  | jq -r '.Items[] | select(.SK.S == "PROFILE") | {id: .PK.S, email: .Email.S}'
 ```
 
 The `sub` value looks like `123456789012345678901`. You'll set this as `ADMIN_GOOGLE_IDS` in Step 4.
@@ -144,6 +164,8 @@ In your GitHub repository, go to **Settings → Secrets and variables → Action
 
 \* `AWS_DEPLOY_ROLE_ARN` is a chicken-and-egg: the IAM role is created by Terraform, but Terraform needs the role to run in CI. **First deploy:** run Terraform locally (see Step 5), then add the role ARN as a secret so subsequent deploys run via CI.
 
+`TF_STATE_BUCKET` is only the bucket name — the lock table name is derived automatically by appending `-lock`. You don't need a separate secret for it.
+
 **Generating TOKEN_SECRET:**
 ```bash
 openssl rand -base64 32
@@ -157,24 +179,36 @@ openssl rand -base64 32
 
 Run Terraform locally for the first time to create all AWS resources including the IAM role for CI.
 
+**Tip:** `terraform/terraform.tfvars.example` contains a fully-commented variable template. Copy it to `terraform/terraform.tfvars` and fill it in instead of passing `-var` flags on every apply.
+
 Generate a `TOKEN_SECRET` first and save it — you'll need to reuse the same value on subsequent applies, or existing sessions will be invalidated:
 
 ```bash
 export TF_VAR_token_secret=$(openssl rand -base64 32)
-echo "TOKEN_SECRET: $TF_VAR_token_secret"   # save this somewhere safe
+echo "$TF_VAR_token_secret"   # save this; add as TOKEN_SECRET GitHub secret (without the TF_VAR_token_secret= prefix)
 ```
 
-Then initialize and apply:
+Set your AWS region if it's not already in your environment:
+
+```bash
+export AWS_DEFAULT_REGION=us-east-1
+```
+
+**OIDC provider caveat:** Terraform creates a GitHub OIDC provider (`aws_iam_openid_connect_provider`) in your account. If one already exists (e.g. from another project), the apply will fail with a duplicate resource error. Import it first:
+
+```bash
+terraform import aws_iam_openid_connect_provider.github \
+  arn:aws:iam::<YOUR_AWS_ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com
+```
+
+Initialize the backend:
 
 ```bash
 cd terraform
 
-# Set AWS_DEFAULT_REGION if not already in your environment
-export AWS_DEFAULT_REGION=us-east-1
-
 terraform init \
-  -backend-config="bucket=notoriousmcp-tfstate-<YOUR_ACCOUNT_ID>" \
-  -backend-config="dynamodb_table=notoriousmcp-tfstate-<YOUR_ACCOUNT_ID>-lock" \
+  -backend-config="bucket=notoriousmcp-tfstate-<YOUR_AWS_ACCOUNT_ID>" \
+  -backend-config="dynamodb_table=notoriousmcp-tfstate-<YOUR_AWS_ACCOUNT_ID>-lock" \
   -backend-config="region=us-east-1"
 ```
 
@@ -244,18 +278,24 @@ This registers the domain via Route53 and wires ACM + CloudFront automatically. 
 
 After deploy, visit `https://<your-cloudfront-domain>/auth/login` and sign in with Google. Your account is created as **pending**.
 
-If your Google subject ID was in `ADMIN_GOOGLE_IDS`, you're automatically set to **admin** on login — no approval needed.
+If your Google subject ID was in `ADMIN_GOOGLE_IDS`, you're automatically set to **admin** on login — no approval needed. Skip to Step 7.
 
-Otherwise, an existing admin must approve you. Connect an MCP client (Step 7), then:
+Otherwise, an existing admin must promote you. If you're setting up for the first time and have no admin yet, use the AWS CLI to update your user record directly:
 
+```bash
+aws dynamodb update-item \
+  --table-name notoriousmcp \
+  --key '{"PK": {"S": "USER#<your-google-sub>"}, "SK": {"S": "PROFILE"}}' \
+  --update-expression "SET #s = :s" \
+  --expression-attribute-names '{"#s": "Status"}' \
+  --expression-attribute-values '{":s": {"S": "admin"}}'
 ```
-update_user(user_id="<your-google-sub>", status="user")
-```
 
-To find pending users:
+Once you have admin access, you can manage other users via MCP tools (Step 7):
 
 ```
 list_users(status="pending")
+update_user(user_id="<google-sub>", status="user")
 ```
 
 ---
@@ -291,7 +331,7 @@ To get a token:
 
 Tokens expire after 1 hour. When a token expires, the server issues a new one via the `X-New-Token` response header — compatible MCP clients handle this automatically.
 
-To load the skill file (teaches the LLM how to use the tools effectively):
+To load the skill file (teaches the LLM how to use the tools effectively), add it to `.claude/settings.json` (project) or `~/.claude/settings.json` (global):
 
 ```json
 {
