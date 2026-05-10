@@ -105,14 +105,23 @@ state_lock_table  = "notoriousmcp-tfstate-<YOUR_AWS_ACCOUNT_ID>-lock"
 
 ## Step 3 — Find Your Google Subject ID
 
-The admin bootstrap requires your Google **subject ID** (`sub`) — a numeric string that uniquely identifies your Google account. You can retrieve it after your first login (Step 6), but it's easier to get it now:
+The admin bootstrap requires your Google **subject ID** (`sub`) — a numeric string that uniquely identifies your Google account.
 
+**Option A — Google token info endpoint** (easiest, no deploy required):
+
+1. Sign in to any Google-connected app and obtain an access token, or use the [OAuth 2.0 Playground](https://developers.google.com/oauthplayground/) to get one for your account.
+2. Call the token info endpoint:
+   ```bash
+   curl "https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=<your_access_token>"
+   ```
+3. The `sub` field in the JSON response is your subject ID.
+
+**Option B — after first deploy** (if you skip this step now):
+
+Log in once via `/auth/login`, then scan DynamoDB:
 ```bash
-# Option A: decode an ID token from Google's token endpoint
-# Option B: use the Google OAuth2 token info endpoint:
-#   https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=<your_access_token>
-# Option C: after first deploy, log in once, then check DynamoDB:
-#   aws dynamodb scan --table-name notoriousmcp | jq '.Items[] | select(.SK.S == "USER")'
+aws dynamodb scan --table-name notoriousmcp \
+  | jq -r '.Items[] | select(.SK.S == "USER") | {id: .PK.S, email: .Email.S}'
 ```
 
 The `sub` value looks like `123456789012345678901`. You'll set this as `ADMIN_GOOGLE_IDS` in Step 4.
@@ -148,20 +157,36 @@ openssl rand -base64 32
 
 Run Terraform locally for the first time to create all AWS resources including the IAM role for CI.
 
+Generate a `TOKEN_SECRET` first and save it — you'll need to reuse the same value on subsequent applies, or existing sessions will be invalidated:
+
+```bash
+export TF_VAR_token_secret=$(openssl rand -base64 32)
+echo "TOKEN_SECRET: $TF_VAR_token_secret"   # save this somewhere safe
+```
+
+Then initialize and apply:
+
 ```bash
 cd terraform
+
+# Set AWS_DEFAULT_REGION if not already in your environment
+export AWS_DEFAULT_REGION=us-east-1
 
 terraform init \
   -backend-config="bucket=notoriousmcp-tfstate-<YOUR_ACCOUNT_ID>" \
   -backend-config="dynamodb_table=notoriousmcp-tfstate-<YOUR_ACCOUNT_ID>-lock" \
   -backend-config="region=us-east-1"
+```
 
+> **Note:** The `redirect_url` below uses a placeholder because you don't have the CloudFront URL yet. You'll re-apply with the real URL after the first deploy.
+
+```bash
 terraform apply \
   -var="google_client_id=<CLIENT_ID>" \
   -var="google_client_secret=<CLIENT_SECRET>" \
   -var="admin_google_ids=<YOUR_GOOGLE_SUB>" \
-  -var="token_secret=$(openssl rand -base64 32)" \
   -var="redirect_url=https://PLACEHOLDER.cloudfront.net/auth/callback"
+  # TF_VAR_token_secret is picked up from the env var set above
 ```
 
 After apply, note the outputs:
@@ -173,9 +198,16 @@ terraform output deploy_role_arn  # e.g. arn:aws:iam::123456789:role/notoriousmc
 
 Then:
 1. Update your Google OAuth redirect URI in Google Cloud Console to use the real CloudFront URL
-2. Re-run `terraform apply` with the real `redirect_url`
+2. Re-apply with the real `redirect_url` (reuse the same `TF_VAR_token_secret`):
+   ```bash
+   terraform apply \
+     -var="google_client_id=<CLIENT_ID>" \
+     -var="google_client_secret=<CLIENT_SECRET>" \
+     -var="admin_google_ids=<YOUR_GOOGLE_SUB>" \
+     -var="redirect_url=https://<your-cloudfront-domain>/auth/callback"
+   ```
 3. Add `deploy_role_arn` as the `AWS_DEPLOY_ROLE_ARN` GitHub secret (Step 4)
-4. Update `REDIRECT_URL` GitHub secret with the real CloudFront URL
+4. Add `REDIRECT_URL` and `TOKEN_SECRET` GitHub secrets with the real values
 
 ### Subsequent deploys (CI/CD)
 
@@ -183,10 +215,14 @@ Push to `main` — GitHub Actions builds the ARM64 Lambda binary, runs `terrafor
 
 ### Optional: Custom Domain
 
-To use a custom domain instead of the CloudFront URL, add domain variables to your `terraform apply`:
+To use a custom domain instead of the CloudFront URL, add domain variables to your `terraform apply`. All `domain_contact_*` fields are required when `domain_name` is set:
 
 ```bash
 terraform apply \
+  -var="google_client_id=<CLIENT_ID>" \
+  -var="google_client_secret=<CLIENT_SECRET>" \
+  -var="admin_google_ids=<YOUR_GOOGLE_SUB>" \
+  -var="redirect_url=https://<your-domain>/auth/callback" \
   -var="domain_name=notoriousmcp.example.com" \
   -var="domain_contact_first_name=Jane" \
   -var="domain_contact_last_name=Smith" \
@@ -196,11 +232,11 @@ terraform apply \
   -var="domain_contact_zip=94105" \
   -var="domain_contact_country_code=US" \
   -var="domain_contact_phone=+1.5555550100" \
-  -var="domain_contact_email=you@example.com" \
-  # ... other required vars
+  -var="domain_contact_email=you@example.com"
+  # TF_VAR_token_secret picked up from env
 ```
 
-This registers the domain via Route53 and wires ACM + CloudFront automatically. Update your `REDIRECT_URL` and Google OAuth redirect URI to use the custom domain.
+This registers the domain via Route53 and wires ACM + CloudFront automatically. Update your `REDIRECT_URL` GitHub secret and Google OAuth redirect URI to use the custom domain.
 
 ---
 
@@ -245,7 +281,7 @@ Add to your MCP client config (e.g. Claude Code's `.claude/settings.json`):
 To get a token:
 1. Visit `https://<your-cloudfront-domain>/auth/login` in a browser
 2. Complete the Google OAuth flow — you'll be redirected back with a short-lived exchange code
-3. POST the exchange code to get a Bearer token:
+3. POST the exchange code to get a Bearer token. The `redirect_uri` must exactly match the one registered in Google Cloud Console (same as your `REDIRECT_URL` secret):
    ```bash
    curl -X POST https://<your-cloudfront-domain>/auth/token \
      -H "Content-Type: application/json" \
@@ -297,6 +333,7 @@ Add `http://localhost:3000/auth/callback` as an authorized redirect URI in your 
 go test ./...
 
 # Integration tests (requires running docker compose services)
+# These env vars match the defaults in docker-compose.yml — source them or inline:
 DYNAMODB_ENDPOINT=http://localhost:8000 \
 TABLE_NAME=notoriousmcp \
 S3_ENDPOINT=http://localhost:9000 \
