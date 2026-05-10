@@ -84,6 +84,11 @@ func transferTTL() int64 {
 // checkTransferCap reads the current month's transfer usage for the user and
 // returns it. Returns an rpcError if the DB read fails (not if over cap — the
 // caller decides whether to block based on the response size).
+//
+// The read-check-increment is not atomic: two concurrent requests can both pass
+// the check and both record transfer, potentially exceeding the cap by up to one
+// response's worth of bytes. This is accepted as soft enforcement — the cap is
+// an abuse guard, not a hard billing limit.
 func (h *Handler) checkTransferCap(ctx context.Context, user *models.User) (int64, *rpcError) {
 	used, err := h.db.GetTransferUsed(ctx, user.UserID, currentMonth())
 	if err != nil {

@@ -30,11 +30,6 @@ func (h *Handler) handleGetNote(ctx context.Context, user *models.User, args map
 		return nil, &rpcError{Code: codeInvalidParams, Message: err.Error()}
 	}
 
-	transferUsed, rpcErr := h.checkTransferCap(ctx, user)
-	if rpcErr != nil {
-		return nil, rpcErr
-	}
-
 	note, err := h.db.GetNote(ctx, user.UserID, noteID)
 	if err != nil {
 		return dbErrResult(err)
@@ -48,18 +43,22 @@ func (h *Handler) handleGetNote(ctx context.Context, user *models.User, args map
 		return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
 	}
 
-	contentBytes := int64(len([]byte(content)))
-	if transferUsed+contentBytes > h.effectiveTransferCap(user) {
-		return dbErrResult(db.ErrTransferCap)
-	}
-
 	note.Content = content
 	result, rpcErr := jsonResult(note)
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
 
+	// Check and record transfer using the actual response size so both sides
+	// of the enforcement use the same unit.
 	responseBytes := int64(len([]byte(result.Content[0].Text)))
+	transferUsed, rpcErr := h.checkTransferCap(ctx, user)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	if transferUsed+responseBytes > h.effectiveTransferCap(user) {
+		return dbErrResult(db.ErrTransferCap)
+	}
 	if _, err := h.db.AddTransferUsed(ctx, user.UserID, currentMonth(), responseBytes, transferTTL()); err != nil {
 		log.Printf("mcp: get note %s: record transfer: %v", noteID, err)
 	}
@@ -84,7 +83,8 @@ func (h *Handler) handleSaveNote(ctx context.Context, user *models.User, args ma
 	var note *models.Note
 
 	if noteID == "" {
-		// Create path.
+		// Create path. user.StorageUsedBytes is from auth middleware (request time)
+		// so concurrent saves can both pass this check; soft enforcement accepted.
 		if user.StorageUsedBytes+newSize > h.effectiveStorageCap(user) {
 			return dbErrResult(db.ErrStorageCap)
 		}

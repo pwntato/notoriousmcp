@@ -991,8 +991,8 @@ func TestIntegrationUsageVisibleInListUsers(t *testing.T) {
 				t.Error("transfer_used_pct missing from list_users response")
 			}
 			// Storage should be > 0 after saving a note.
-			if pct, ok := u["storage_used_pct"].(float64); !ok || pct < 0 {
-				t.Errorf("storage_used_pct: unexpected value %v", u["storage_used_pct"])
+			if pct, ok := u["storage_used_pct"].(float64); !ok || pct <= 0 {
+				t.Errorf("storage_used_pct: want > 0 after save, got %v", u["storage_used_pct"])
 			}
 		}
 	}

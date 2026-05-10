@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -243,56 +242,42 @@ func (c *Client) ListUsers(ctx context.Context, status *models.UserStatus) ([]mo
 	return users, nil
 }
 
-// UpdateUserCaps sets per-user cap overrides. A non-nil value sets the cap;
-// nil removes the per-user override (restoring the server default).
+// UpdateStorageCap sets or clears the per-user storage cap override. A non-nil
+// value sets the cap; nil removes the override (restoring the server default).
 // Returns ErrNotFound if the user does not exist.
-func (c *Client) UpdateUserCaps(ctx context.Context, userID string, storageCap, transferCap *int64) error {
-	var setParts, removeParts []string
-	names := map[string]string{}
-	vals := map[string]types.AttributeValue{}
+func (c *Client) UpdateStorageCap(ctx context.Context, userID string, cap *int64) error {
+	return updateSingleCap(ctx, c, userID, "StorageCapBytes", "#sc", ":sc", cap, "update storage cap")
+}
 
-	if storageCap != nil {
-		setParts = append(setParts, "#sc = :sc")
-		names["#sc"] = "StorageCapBytes"
-		vals[":sc"] = &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", *storageCap)}
-	} else {
-		removeParts = append(removeParts, "StorageCapBytes")
-	}
+// UpdateTransferCap sets or clears the per-user monthly transfer cap override.
+// A non-nil value sets the cap; nil removes the override.
+// Returns ErrNotFound if the user does not exist.
+func (c *Client) UpdateTransferCap(ctx context.Context, userID string, cap *int64) error {
+	return updateSingleCap(ctx, c, userID, "TransferCapBytes", "#tc", ":tc", cap, "update transfer cap")
+}
 
-	if transferCap != nil {
-		setParts = append(setParts, "#tc = :tc")
-		names["#tc"] = "TransferCapBytes"
-		vals[":tc"] = &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", *transferCap)}
-	} else {
-		removeParts = append(removeParts, "TransferCapBytes")
-	}
-
+// updateSingleCap is the shared implementation for UpdateStorageCap and UpdateTransferCap.
+// It sets the named attribute when cap is non-nil, or REMOVEs it when nil.
+func updateSingleCap(ctx context.Context, c *Client, userID, attr, nameKey, valKey string, cap *int64, opName string) error {
 	var expr string
-	if len(setParts) > 0 {
-		expr += "SET " + strings.Join(setParts, ", ")
-	}
-	if len(removeParts) > 0 {
-		if expr != "" {
-			expr += " "
-		}
-		expr += "REMOVE " + strings.Join(removeParts, ", ")
-	}
-
 	input := &dynamodb.UpdateItemInput{
 		TableName: aws.String(c.tableName),
 		Key: map[string]types.AttributeValue{
 			"PK": &types.AttributeValueMemberS{Value: pk(userID)},
 			"SK": &types.AttributeValueMemberS{Value: profileSK()},
 		},
-		UpdateExpression:    aws.String(expr),
 		ConditionExpression: aws.String("attribute_exists(PK)"),
 	}
-	if len(names) > 0 {
-		input.ExpressionAttributeNames = names
+	if cap != nil {
+		expr = "SET " + nameKey + " = " + valKey
+		input.ExpressionAttributeNames = map[string]string{nameKey: attr}
+		input.ExpressionAttributeValues = map[string]types.AttributeValue{
+			valKey: &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", *cap)},
+		}
+	} else {
+		expr = "REMOVE " + attr
 	}
-	if len(vals) > 0 {
-		input.ExpressionAttributeValues = vals
-	}
+	input.UpdateExpression = aws.String(expr)
 
 	_, err := c.ddb.UpdateItem(ctx, input)
 	if err != nil {
@@ -300,7 +285,7 @@ func (c *Client) UpdateUserCaps(ctx context.Context, userID string, storageCap, 
 		if errors.As(err, &cfe) {
 			return ErrNotFound
 		}
-		return fmt.Errorf("update user caps: %w", err)
+		return fmt.Errorf("%s: %w", opName, err)
 	}
 	return nil
 }

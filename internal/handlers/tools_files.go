@@ -48,19 +48,9 @@ func (h *Handler) handleGetFile(ctx context.Context, user *models.User, args map
 		return nil, &rpcError{Code: codeInvalidParams, Message: err.Error()}
 	}
 
-	transferUsed, rpcErr := h.checkTransferCap(ctx, user)
-	if rpcErr != nil {
-		return nil, rpcErr
-	}
-
 	f, err := h.db.GetFile(ctx, user.UserID, filePath)
 	if err != nil {
 		return dbErrResult(err)
-	}
-
-	contentBytes := f.Size
-	if transferUsed+contentBytes > h.effectiveTransferCap(user) {
-		return dbErrResult(db.ErrTransferCap)
 	}
 
 	content, err := h.store.GetContent(ctx, f.S3Key)
@@ -76,7 +66,16 @@ func (h *Handler) handleGetFile(ctx context.Context, user *models.User, args map
 		return nil, rpcErr
 	}
 
+	// Check and record transfer using the actual response size so both sides
+	// of the enforcement use the same unit.
 	responseBytes := int64(len([]byte(result.Content[0].Text)))
+	transferUsed, rpcErr := h.checkTransferCap(ctx, user)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	if transferUsed+responseBytes > h.effectiveTransferCap(user) {
+		return dbErrResult(db.ErrTransferCap)
+	}
 	if _, err := h.db.AddTransferUsed(ctx, user.UserID, currentMonth(), responseBytes, transferTTL()); err != nil {
 		log.Printf("mcp: get file %s: record transfer: %v", filePath, err)
 	}

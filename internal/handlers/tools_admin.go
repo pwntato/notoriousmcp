@@ -43,12 +43,14 @@ func (h *Handler) handleListUsers(ctx context.Context, args map[string]any) (*to
 		storageCap := h.effectiveStorageCap(&u)
 		transferCap := h.effectiveTransferCap(&u)
 		storagePct := 0
-		if storageCap > 0 {
-			storagePct = int(u.StorageUsedBytes * 100 / storageCap)
+		if storageCap > 0 && u.StorageUsedBytes > 0 {
+			// Round up to 1 so any non-zero usage shows as at least 1% rather
+			// than silently appearing as 0 for small values.
+			storagePct = max(1, int(float64(u.StorageUsedBytes)*100/float64(storageCap)))
 		}
 		transferPct := 0
-		if transferCap > 0 {
-			transferPct = int(transferUsed * 100 / transferCap)
+		if transferCap > 0 && transferUsed > 0 {
+			transferPct = max(1, int(float64(transferUsed)*100/float64(transferCap)))
 		}
 		out = append(out, userWithUsage{
 			User:            u,
@@ -87,21 +89,32 @@ func (h *Handler) handleUpdateUser(ctx context.Context, caller *models.User, arg
 		return dbErrResult(err)
 	}
 
-	// Optional cap overrides. Both are nullable: pass -1 to clear, omit to leave unchanged.
-	storageCap, hasStorage := int64ArgOpt(args, "storage_cap_bytes")
-	transferCap, hasTransfer := int64ArgOpt(args, "transfer_cap_bytes")
-	if hasStorage || hasTransfer {
-		var scPtr, tcPtr *int64
-		if hasStorage && storageCap >= 0 {
-			scPtr = &storageCap
+	// Optional cap overrides. Each field is independent: omit to leave unchanged,
+	// pass -1 to clear the per-user override and restore the server default.
+	if storageCap, hasStorage := int64ArgOpt(args, "storage_cap_bytes"); hasStorage {
+		var capPtr *int64
+		if storageCap >= 0 {
+			capPtr = &storageCap
 		}
-		if hasTransfer && transferCap >= 0 {
-			tcPtr = &transferCap
-		}
-		if err := h.db.UpdateUserCaps(ctx, userID, scPtr, tcPtr); err != nil {
-			if !errors.Is(err, db.ErrNotFound) {
-				log.Printf("admin: update caps for %s: %v", userID, err)
+		if err := h.db.UpdateStorageCap(ctx, userID, capPtr); err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				return errorResult("user not found")
 			}
+			log.Printf("admin: update storage cap for %s: %v", userID, err)
+			return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
+		}
+	}
+	if transferCap, hasTransfer := int64ArgOpt(args, "transfer_cap_bytes"); hasTransfer {
+		var capPtr *int64
+		if transferCap >= 0 {
+			capPtr = &transferCap
+		}
+		if err := h.db.UpdateTransferCap(ctx, userID, capPtr); err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				return errorResult("user not found")
+			}
+			log.Printf("admin: update transfer cap for %s: %v", userID, err)
+			return nil, &rpcError{Code: codeInternalError, Message: "internal error"}
 		}
 	}
 
