@@ -86,7 +86,8 @@ func (h *Handler) handleSaveFile(ctx context.Context, user *models.User, args ma
 	if dbErr != nil && !errors.Is(dbErr, db.ErrNotFound) {
 		return dbErrResult(dbErr)
 	}
-
+	// existing is nil iff GetFile returned ErrNotFound; the block below always returns,
+	// so all code after it can safely dereference existing.
 	if existing == nil {
 		f = &models.File{
 			Path:   filePath,
