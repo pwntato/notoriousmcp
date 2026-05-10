@@ -229,7 +229,7 @@ func (h *Handler) userTools() []registeredTool {
 						"status":   {Type: "string", Description: "Todo status.", Enum: []string{"pending", "in_progress", "done"}},
 						"due_date": {Type: "string", Description: "Due date (RFC3339)."},
 						"tags":     {Type: "array", Description: "Tag list.", Items: &items{Type: "string"}},
-						"version":  {Type: "number", Description: "Current version for optimistic concurrency (omit when creating)."},
+						"version":  {Type: "number", Description: "Next version to store (current + 1). Omit when creating or to skip conflict detection."},
 					},
 				},
 			},
