@@ -60,27 +60,27 @@ func New(dbClient *db.Client, storeClient *store.Client, cfg Config) *Handler {
 // Negative values can't be stored (handleUpdateUser rejects them via the >= 0
 // guard), but clamp to 0 defensively so the > comparison stays correct.
 func (h *Handler) effectiveStorageCap(u *models.User) int64 {
-	cap := h.cfg.DefaultStorageCap
+	capBytes := h.cfg.DefaultStorageCap
 	if u.StorageCapBytes != nil {
-		cap = *u.StorageCapBytes
+		capBytes = *u.StorageCapBytes
 	}
-	if cap < 0 {
+	if capBytes < 0 {
 		return 0
 	}
-	return cap
+	return capBytes
 }
 
 // effectiveTransferCap returns the monthly transfer cap in bytes for a user,
 // falling back to the server default. Same semantics as effectiveStorageCap.
 func (h *Handler) effectiveTransferCap(u *models.User) int64 {
-	cap := h.cfg.DefaultTransferCap
+	capBytes := h.cfg.DefaultTransferCap
 	if u.TransferCapBytes != nil {
-		cap = *u.TransferCapBytes
+		capBytes = *u.TransferCapBytes
 	}
-	if cap < 0 {
+	if capBytes < 0 {
 		return 0
 	}
-	return cap
+	return capBytes
 }
 
 // currentMonth returns the current UTC month in YYYY-MM format for transfer records.
@@ -100,8 +100,9 @@ func transferTTL() int64 {
 }
 
 // checkTransferCap reads the current month's transfer usage for the user and
-// returns it. Returns an rpcError if the DB read fails (not if over cap — the
-// caller decides whether to block based on the response size).
+// returns it. The caller fetches S3 content first, serializes the response,
+// then calls this to decide whether to block (post-fetch check). The check is
+// post-fetch by design: response size can only be known after serialization.
 //
 // The read-check-increment is not atomic: two concurrent requests can both pass
 // the check and both record transfer, potentially exceeding the cap by up to one

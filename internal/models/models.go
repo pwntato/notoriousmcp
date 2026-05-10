@@ -28,6 +28,9 @@ type User struct {
 	TransferCapBytes *int64     `json:"transfer_cap_bytes"  dynamodbav:"TransferCapBytes,omitempty"`
 }
 
+// Note is the note metadata model. Size is intentionally included in JSON —
+// it mirrors File.Size and lets callers make informed decisions before
+// fetching content. Pre-migration notes have Size==0.
 type Note struct {
 	ID         string    `json:"id"          dynamodbav:"ID"`
 	UserID     string    `json:"user_id"     dynamodbav:"UserID"`

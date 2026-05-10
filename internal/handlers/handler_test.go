@@ -1168,6 +1168,23 @@ func TestIntegrationPerUserTransferCapOverride(t *testing.T) {
 	}
 }
 
+func TestUpdateUserNoFields(t *testing.T) {
+	// update_user with only user_id and no other fields should return -32602.
+	user := &models.User{UserID: "u1", Status: models.StatusAdmin}
+	h := newUnitHandler(user)
+
+	resp := doMCPRequest(t, h, "tools/call", map[string]any{
+		"name":      "update_user",
+		"arguments": map[string]any{"user_id": "u2"},
+	})
+	if resp.Error == nil {
+		t.Fatal("expected error when no fields provided to update_user")
+	}
+	if resp.Error.Code != -32602 {
+		t.Errorf("code: got %d want -32602 (invalid params)", resp.Error.Code)
+	}
+}
+
 // ---- test helpers ----
 
 type toolEntry struct {

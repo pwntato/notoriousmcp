@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -353,8 +354,8 @@ func (c *Client) AddTransferUsed(ctx context.Context, userID, month string, delt
 	if !ok {
 		return 0, fmt.Errorf("add transfer used: unexpected type for BytesOut")
 	}
-	var total int64
-	if _, err := fmt.Sscanf(n.Value, "%d", &total); err != nil {
+	total, err := strconv.ParseInt(n.Value, 10, 64)
+	if err != nil {
 		return 0, fmt.Errorf("add transfer used: parse BytesOut: %w", err)
 	}
 	return total, nil
@@ -385,8 +386,8 @@ func (c *Client) GetTransferUsed(ctx context.Context, userID, month string) (int
 	if !ok {
 		return 0, nil
 	}
-	var total int64
-	if _, err := fmt.Sscanf(n.Value, "%d", &total); err != nil {
+	total, err := strconv.ParseInt(n.Value, 10, 64)
+	if err != nil {
 		return 0, fmt.Errorf("get transfer used: parse BytesOut: %w", err)
 	}
 	return total, nil
