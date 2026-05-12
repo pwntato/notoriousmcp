@@ -86,17 +86,14 @@ data "aws_iam_policy_document" "deploy_policy" {
   }
 
   statement {
-    actions = [
-      "s3:GetBucketEncryption",
-      "s3:GetEncryptionConfiguration",
-      "s3:GetBucketVersioning",
-      "s3:GetBucketPublicAccessBlock",
-      "s3:GetLifecycleConfiguration",
-      "s3:GetBucketTagging",
-    ]
+    # Use s3:Get* to cover all bucket read actions Terraform may call during refresh
+    # without having to enumerate each individual action.
+    actions = ["s3:Get*", "s3:List*"]
     resources = [
       "arn:aws:s3:::${aws_s3_bucket.content.bucket}",
+      "arn:aws:s3:::${aws_s3_bucket.content.bucket}/*",
       "arn:aws:s3:::${var.state_bucket}",
+      "arn:aws:s3:::${var.state_bucket}/*",
     ]
   }
 
