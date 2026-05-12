@@ -100,7 +100,7 @@ data "aws_iam_policy_document" "deploy_policy" {
   }
 
   statement {
-    actions = ["ssm:GetParameter", "ssm:ListTagsForResource"]
+    actions = ["ssm:GetParameter", "ssm:GetParameters", "ssm:ListTagsForResource"]
     resources = [
       aws_ssm_parameter.google_client_id.arn,
       aws_ssm_parameter.google_client_secret.arn,
