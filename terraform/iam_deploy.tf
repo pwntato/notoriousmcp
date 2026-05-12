@@ -52,6 +52,7 @@ data "aws_iam_policy_document" "deploy_policy" {
     actions = [
       "dynamodb:DescribeTable",
       "dynamodb:DescribeTimeToLive",
+      "dynamodb:DescribeContinuousBackups",
       "dynamodb:ListTagsOfResource",
     ]
     resources = ["arn:aws:dynamodb:*:${data.aws_caller_identity.current.account_id}:table/*"]
@@ -79,13 +80,14 @@ data "aws_iam_policy_document" "deploy_policy" {
   }
 
   statement {
-    actions   = ["logs:DescribeLogGroups"]
+    actions   = ["logs:DescribeLogGroups", "logs:ListTagsForResource"]
     resources = ["*"]
   }
 
   statement {
     actions = [
       "s3:GetBucketEncryption",
+      "s3:GetEncryptionConfiguration",
       "s3:GetBucketVersioning",
       "s3:GetBucketPublicAccessBlock",
       "s3:GetLifecycleConfiguration",
@@ -98,7 +100,7 @@ data "aws_iam_policy_document" "deploy_policy" {
   }
 
   statement {
-    actions = ["ssm:GetParameter", "ssm:ListTagsForResource"]
+    actions = ["ssm:GetParameter", "ssm:ListTagsForResource", "ssm:DescribeParameters"]
     resources = [
       aws_ssm_parameter.google_client_id.arn,
       aws_ssm_parameter.google_client_secret.arn,
