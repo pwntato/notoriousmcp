@@ -45,6 +45,7 @@ jobs:
         run: terraform plan -out=tfplan
         working-directory: terraform
         env:
+          TF_VAR_aws_region: us-west-2
           TF_VAR_state_bucket: ${{ vars.TF_STATE_BUCKET }}
           TF_VAR_google_client_id: ${{ secrets.GOOGLE_CLIENT_ID }}
           TF_VAR_google_client_secret: ${{ secrets.GOOGLE_CLIENT_SECRET }}
