@@ -37,46 +37,111 @@ resource "aws_iam_role" "deploy" {
 }
 
 data "aws_iam_policy_document" "deploy_policy" {
+  # Terraform plan needs read access to all managed resources to refresh state.
+  # These are read-only actions scoped to this account.
   statement {
-    actions   = ["lambda:UpdateFunctionCode", "lambda:GetFunction"]
-    resources = [aws_lambda_function.main.arn]
+    actions = [
+      "cloudfront:GetDistribution",
+      "cloudfront:GetOriginAccessControl",
+      "cloudfront:ListTagsForResource",
+    ]
+    resources = ["*"]
   }
 
   statement {
     actions = [
-      "lambda:CreateFunctionUrlConfig",
-      "lambda:UpdateFunctionUrlConfig",
+      "dynamodb:DescribeTable",
+      "dynamodb:DescribeTimeToLive",
+      "dynamodb:ListTagsOfResource",
+    ]
+    resources = ["arn:aws:dynamodb:*:${data.aws_caller_identity.current.account_id}:table/*"]
+  }
+
+  statement {
+    actions = [
+      "iam:GetOpenIDConnectProvider",
+      "iam:GetRole",
+      "iam:GetRolePolicy",
+      "iam:ListAttachedRolePolicies",
+      "iam:ListRolePolicies",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    actions = [
+      "lambda:GetFunction",
       "lambda:GetFunctionUrlConfig",
-      "lambda:AddPermission",
-      "lambda:RemovePermission",
+      "lambda:GetPolicy",
+      "lambda:ListVersionsByFunction",
     ]
     resources = [aws_lambda_function.main.arn]
   }
 
   statement {
+    actions   = ["logs:DescribeLogGroups"]
+    resources = ["*"]
+  }
+
+  statement {
+    actions = [
+      "s3:GetBucketEncryption",
+      "s3:GetBucketVersioning",
+      "s3:GetBucketPublicAccessBlock",
+      "s3:GetLifecycleConfiguration",
+      "s3:GetBucketTagging",
+    ]
+    resources = [
+      "arn:aws:s3:::${aws_s3_bucket.content.bucket}",
+      "arn:aws:s3:::${var.state_bucket}",
+    ]
+  }
+
+  statement {
+    actions = ["ssm:GetParameter", "ssm:ListTagsForResource"]
+    resources = [
+      aws_ssm_parameter.google_client_id.arn,
+      aws_ssm_parameter.google_client_secret.arn,
+      aws_ssm_parameter.admin_google_ids.arn,
+      aws_ssm_parameter.token_secret.arn,
+    ]
+  }
+
+  # Write permissions for terraform apply
+  statement {
     actions = [
       "cloudfront:CreateInvalidation",
-      "cloudfront:GetDistribution",
       "cloudfront:UpdateDistribution",
     ]
     resources = [aws_cloudfront_distribution.main.arn]
   }
 
   statement {
+    actions = [
+      "lambda:UpdateFunctionCode",
+      "lambda:UpdateFunctionConfiguration",
+      "lambda:AddPermission",
+      "lambda:RemovePermission",
+      "lambda:CreateFunctionUrlConfig",
+      "lambda:UpdateFunctionUrlConfig",
+    ]
+    resources = [aws_lambda_function.main.arn]
+  }
+
+  statement {
     # ssm:PutParameter allows CI to rotate OAuth credentials and admin IDs via terraform apply.
     # This is intentional — Terraform manages these values — but means anyone who can push to
     # main (currently only pwntato) can overwrite production secrets.
-    actions = [
-      "ssm:PutParameter",
-      "ssm:GetParameter",
-    ]
+    actions = ["ssm:PutParameter"]
     resources = [
       aws_ssm_parameter.google_client_id.arn,
       aws_ssm_parameter.google_client_secret.arn,
       aws_ssm_parameter.admin_google_ids.arn,
+      aws_ssm_parameter.token_secret.arn,
     ]
   }
 
+  # Terraform state backend
   statement {
     actions = [
       "s3:GetObject",
