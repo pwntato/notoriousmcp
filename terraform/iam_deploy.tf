@@ -89,7 +89,6 @@ data "aws_iam_policy_document" "deploy_policy" {
       "s3:GetBucketVersioning",
       "s3:GetBucketPublicAccessBlock",
       "s3:GetLifecycleConfiguration",
-      "s3:GetBucketObjectLockConfiguration",
       "s3:GetBucketTagging",
     ]
     resources = [
