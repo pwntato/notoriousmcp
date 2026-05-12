@@ -24,12 +24,9 @@ data "aws_iam_policy_document" "deploy_assume_role" {
       values   = ["sts.amazonaws.com"]
     }
     condition {
-      test     = "StringLike"
+      test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = [
-        "repo:pwntato/notoriousmcp:ref:refs/heads/main",
-        "repo:pwntato/notoriousmcp:environment:production",
-      ]
+      values   = ["repo:pwntato/notoriousmcp:environment:production"]
     }
   }
 }
