@@ -96,7 +96,8 @@ data "aws_iam_policy_document" "deploy_policy" {
       "dynamodb:PutItem",
       "dynamodb:DeleteItem",
     ]
-    resources = ["arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/${var.state_bucket}-lock"]
+    # State lock table is always in us-east-1 (created by bootstrap, which has no region variable)
+    resources = ["arn:aws:dynamodb:us-east-1:${data.aws_caller_identity.current.account_id}:table/${var.state_bucket}-lock"]
   }
 }
 
