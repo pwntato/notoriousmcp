@@ -69,14 +69,14 @@ resource "aws_cloudwatch_log_group" "lambda" {
 }
 
 resource "aws_lambda_function" "main" {
-  function_name                  = "notoriousmcp-${var.environment}"
-  role                           = aws_iam_role.lambda.arn
-  handler                        = "bootstrap"
-  runtime                        = "provided.al2023"
-  architectures                  = ["arm64"]
-  filename                       = "${path.root}/../lambda.zip"
-  timeout     = 30
-  memory_size = 256
+  function_name = "notoriousmcp-${var.environment}"
+  role          = aws_iam_role.lambda.arn
+  handler       = "bootstrap"
+  runtime       = "provided.al2023"
+  architectures = ["arm64"]
+  filename      = "${path.root}/../lambda.zip"
+  timeout       = 30
+  memory_size   = 256
 
   environment {
     variables = {
