@@ -119,6 +119,19 @@ data "aws_iam_policy_document" "deploy_policy" {
   # Write permissions for terraform apply
   statement {
     actions = [
+      "s3:PutEncryptionConfiguration",
+      "s3:PutBucketVersioning",
+      "s3:PutBucketPublicAccessBlock",
+      "s3:PutLifecycleConfiguration",
+      "s3:PutBucketTagging",
+      "s3:DeleteBucketEncryption",
+      "s3:DeletePublicAccessBlock",
+    ]
+    resources = ["arn:aws:s3:::${aws_s3_bucket.content.bucket}"]
+  }
+
+  statement {
+    actions = [
       "cloudfront:CreateInvalidation",
       "cloudfront:UpdateDistribution",
     ]
