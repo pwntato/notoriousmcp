@@ -68,6 +68,10 @@ resource "aws_cloudwatch_log_group" "lambda" {
   retention_in_days = 14
 }
 
+# reserved_concurrent_executions is intentionally omitted. New AWS accounts have an
+# unreserved concurrency floor of 10; reserving 10 for this function would push the
+# account below that floor and fail. At personal-use scale, unbounded concurrency
+# is not a practical concern. Add a reservation once your account limit is raised.
 resource "aws_lambda_function" "main" {
   function_name = "notoriousmcp-${var.environment}"
   role          = aws_iam_role.lambda.arn
