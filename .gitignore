@@ -1,6 +1,9 @@
 # Binaries
 bin/
 *.exe
+bootstrap
+lambda.zip
+server
 
 # Environment
 .env
