@@ -28,29 +28,29 @@ jobs:
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: us-east-1
+          aws-region: us-west-2
 
       - uses: hashicorp/setup-terraform@v3
 
       - name: terraform init
         run: |
           terraform init \
-            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
-            -backend-config="dynamodb_table=${{ secrets.TF_STATE_BUCKET }}-lock"
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="dynamodb_table=${{ vars.TF_STATE_BUCKET }}-lock"
         working-directory: terraform
         env:
-          TF_VAR_state_bucket: ${{ secrets.TF_STATE_BUCKET }}
+          TF_VAR_state_bucket: ${{ vars.TF_STATE_BUCKET }}
 
       - name: terraform plan
         run: terraform plan -out=tfplan
         working-directory: terraform
         env:
-          TF_VAR_state_bucket: ${{ secrets.TF_STATE_BUCKET }}
+          TF_VAR_state_bucket: ${{ vars.TF_STATE_BUCKET }}
           TF_VAR_google_client_id: ${{ secrets.GOOGLE_CLIENT_ID }}
           TF_VAR_google_client_secret: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           TF_VAR_admin_google_ids: ${{ secrets.ADMIN_GOOGLE_IDS }}
           TF_VAR_token_secret: ${{ secrets.TOKEN_SECRET }}
-          TF_VAR_redirect_url: ${{ secrets.REDIRECT_URL }}
+          TF_VAR_redirect_url: ${{ vars.REDIRECT_URL }}
 
       - name: terraform apply
         run: terraform apply -auto-approve tfplan
