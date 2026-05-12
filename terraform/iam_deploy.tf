@@ -100,13 +100,19 @@ data "aws_iam_policy_document" "deploy_policy" {
   }
 
   statement {
-    actions = ["ssm:GetParameter", "ssm:ListTagsForResource", "ssm:DescribeParameters"]
+    actions = ["ssm:GetParameter", "ssm:ListTagsForResource"]
     resources = [
       aws_ssm_parameter.google_client_id.arn,
       aws_ssm_parameter.google_client_secret.arn,
       aws_ssm_parameter.admin_google_ids.arn,
       aws_ssm_parameter.token_secret.arn,
     ]
+  }
+
+  statement {
+    # DescribeParameters does not support resource-level restrictions
+    actions   = ["ssm:DescribeParameters"]
+    resources = ["*"]
   }
 
   # Write permissions for terraform apply
