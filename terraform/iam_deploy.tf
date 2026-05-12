@@ -79,7 +79,7 @@ data "aws_iam_policy_document" "deploy_policy" {
   }
 
   statement {
-    actions = ["logs:DescribeLogGroups"]
+    actions   = ["logs:DescribeLogGroups"]
     resources = ["*"]
   }
 
