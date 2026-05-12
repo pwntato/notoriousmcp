@@ -75,9 +75,8 @@ resource "aws_lambda_function" "main" {
   runtime                        = "provided.al2023"
   architectures                  = ["arm64"]
   filename                       = "${path.root}/../lambda.zip"
-  timeout                        = 30
-  memory_size                    = 256
-  reserved_concurrent_executions = 10
+  timeout     = 30
+  memory_size = 256
 
   environment {
     variables = {

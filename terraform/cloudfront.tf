@@ -1,5 +1,5 @@
 locals {
-  lambda_url_host = replace(aws_lambda_function_url.main.function_url, "https://", "")
+  lambda_url_host = trimsuffix(replace(aws_lambda_function_url.main.function_url, "https://", ""), "/")
   cf_origin_id    = "lambda"
 }
 
