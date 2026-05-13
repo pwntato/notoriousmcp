@@ -33,10 +33,10 @@ A self-hosted MCP (Model Context Protocol) server for notes, todo lists, files, 
 MCP Client
     │  Authorization: Bearer <token>
     ▼
-CloudFront  (OAC — signs requests with AWS_IAM)
+CloudFront  (HTTPS termination; no OAC — app handles its own auth)
     │
     ▼
-Lambda Function URL  (AWS_IAM auth, response streaming)
+Lambda Function URL  (AuthType: NONE, invoke mode: BUFFERED)
     │
     ├── DynamoDB  (single table — users, notes, todos, files, auth codes)
     ├── S3        (note and file content; metadata lives in DynamoDB)
@@ -318,6 +318,8 @@ Add to your MCP client config (e.g. Claude Code's `.claude/settings.json`):
   }
 }
 ```
+
+> **Note:** RFC 7591 dynamic client registration is not yet implemented ([#74](https://github.com/pwntato/notoriousmcp/issues/74)). MCP clients that require it (including Claude Code's `claude mcp add --transport http` OAuth flow) will fail to connect until that issue is resolved. In the meantime, obtain a token manually using the steps below and supply it as a static Bearer header.
 
 To get a token:
 1. Visit `https://<your-cloudfront-domain>/auth/login` in a browser
