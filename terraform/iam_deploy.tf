@@ -93,7 +93,6 @@ data "aws_iam_policy_document" "deploy_policy" {
       "arn:aws:s3:::${aws_s3_bucket.content.bucket}",
       "arn:aws:s3:::${aws_s3_bucket.content.bucket}/*",
       "arn:aws:s3:::${var.state_bucket}",
-      "arn:aws:s3:::${var.state_bucket}/*",
     ]
   }
 
