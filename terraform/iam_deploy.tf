@@ -115,6 +115,66 @@ data "aws_iam_policy_document" "deploy_policy" {
   # Write permissions for terraform apply
   statement {
     actions = [
+      "cloudfront:CreateOriginAccessControl",
+      "cloudfront:UpdateOriginAccessControl",
+      "cloudfront:DeleteOriginAccessControl",
+      "cloudfront:CreateInvalidation",
+      "cloudfront:UpdateDistribution",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    actions = [
+      "dynamodb:CreateTable",
+      "dynamodb:UpdateTable",
+      "dynamodb:DeleteTable",
+      "dynamodb:UpdateTimeToLive",
+      "dynamodb:TagResource",
+      "dynamodb:UntagResource",
+    ]
+    resources = ["arn:aws:dynamodb:*:${data.aws_caller_identity.current.account_id}:table/*"]
+  }
+
+  statement {
+    actions = [
+      "iam:PutRolePolicy",
+      "iam:DeleteRolePolicy",
+      "iam:UpdateAssumeRolePolicy",
+      "iam:CreateOpenIDConnectProvider",
+      "iam:UpdateOpenIDConnectProvider",
+      "iam:DeleteOpenIDConnectProvider",
+      "iam:TagOpenIDConnectProvider",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    actions = [
+      "lambda:UpdateFunctionCode",
+      "lambda:UpdateFunctionConfiguration",
+      "lambda:AddPermission",
+      "lambda:RemovePermission",
+      "lambda:CreateFunctionUrlConfig",
+      "lambda:UpdateFunctionUrlConfig",
+      "lambda:TagResource",
+    ]
+    resources = [aws_lambda_function.main.arn]
+  }
+
+  statement {
+    actions = [
+      "logs:CreateLogGroup",
+      "logs:PutRetentionPolicy",
+      "logs:DeleteLogGroup",
+      "logs:TagLogGroup",
+      "logs:TagResource",
+    ]
+    resources = ["arn:aws:logs:*:${data.aws_caller_identity.current.account_id}:log-group:*"]
+  }
+
+  statement {
+    actions = [
       "s3:PutEncryptionConfiguration",
       "s3:PutBucketVersioning",
       "s3:PutBucketPublicAccessBlock",
@@ -127,30 +187,10 @@ data "aws_iam_policy_document" "deploy_policy" {
   }
 
   statement {
-    actions = [
-      "cloudfront:CreateInvalidation",
-      "cloudfront:UpdateDistribution",
-    ]
-    resources = [aws_cloudfront_distribution.main.arn]
-  }
-
-  statement {
-    actions = [
-      "lambda:UpdateFunctionCode",
-      "lambda:UpdateFunctionConfiguration",
-      "lambda:AddPermission",
-      "lambda:RemovePermission",
-      "lambda:CreateFunctionUrlConfig",
-      "lambda:UpdateFunctionUrlConfig",
-    ]
-    resources = [aws_lambda_function.main.arn]
-  }
-
-  statement {
     # ssm:PutParameter allows CI to rotate OAuth credentials and admin IDs via terraform apply.
     # This is intentional — Terraform manages these values — but means anyone who can push to
     # main (currently only pwntato) can overwrite production secrets.
-    actions = ["ssm:PutParameter"]
+    actions = ["ssm:PutParameter", "ssm:AddTagsToResource"]
     resources = [
       aws_ssm_parameter.google_client_id.arn,
       aws_ssm_parameter.google_client_secret.arn,
