@@ -1,7 +1,7 @@
 resource "aws_lambda_function_url" "main" {
   function_name      = aws_lambda_function.main.function_name
   authorization_type = "NONE"
-  invoke_mode        = "RESPONSE_STREAM"
+  invoke_mode        = "BUFFERED"
 }
 
 # AuthType NONE requires explicit public resource-based policy statements.
