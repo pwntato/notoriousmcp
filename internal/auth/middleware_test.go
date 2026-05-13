@@ -525,6 +525,54 @@ func TestMiddlewareRefreshTokenRotation(t *testing.T) {
 	}
 }
 
+func TestMiddlewareRefreshTokenNoRotation(t *testing.T) {
+	// When Google does not rotate the refresh token (empty refresh_token in response),
+	// the stored DynamoDB token must be unchanged — the rotatedToken != "" guard.
+	dbClient := newTestDBClient(t)
+	userID := randUID()
+	saveTestUser(t, dbClient, userID, models.StatusUser)
+	original := "original-google-refresh-token"
+	if err := dbClient.SaveRefreshToken(context.Background(), userID, original); err != nil {
+		t.Fatalf("save refresh token: %v", err)
+	}
+
+	expired, err := auth.IssueExpiredToken(testSecret, userID)
+	if err != nil {
+		t.Fatalf("issue expired: %v", err)
+	}
+
+	// Fake Google server returns no refresh_token field (omitted = empty string in oauth2 lib).
+	googleSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "google-access-token",
+			"token_type":   "Bearer",
+			"expires_in":   3600,
+			// refresh_token intentionally omitted
+		})
+	}))
+	defer googleSrv.Close()
+
+	h := auth.Middleware(testMiddlewareCfgWithGoogleURL(googleSrv.URL), dbClient, http.HandlerFunc(okHandler))
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Authorization", "Bearer "+expired)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200", w.Code)
+	}
+
+	// Stored token must be unchanged — no rotation occurred.
+	stored, err := dbClient.LoadRefreshToken(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("load refresh token: %v", err)
+	}
+	if stored != original {
+		t.Errorf("stored refresh token changed without rotation: got %q want %q", stored, original)
+	}
+}
+
 func TestMiddlewareExpiredTokenRevokedRefreshToken(t *testing.T) {
 	// When Google rejects the stored refresh token (revoked), the middleware must
 	// return 401 and delete the token from DynamoDB so future attempts fail fast.
