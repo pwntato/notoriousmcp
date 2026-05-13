@@ -22,11 +22,11 @@ resource "aws_cloudfront_distribution" "main" {
     origin_id                = local.cf_origin_id
     origin_access_control_id = aws_cloudfront_origin_access_control.lambda.id
 
-    custom_origin_config {
-      http_port              = 80
-      https_port             = 443
-      origin_protocol_policy = "https-only"
-      origin_ssl_protocols   = ["TLSv1.2"]
+    # Terraform requires s3_origin_config or custom_origin_config; use an empty
+    # s3_origin_config (no OAI) so the provider is satisfied without adding a
+    # custom_origin_config block, which breaks OAC signing for Lambda URL origins.
+    s3_origin_config {
+      origin_access_identity = ""
     }
   }
 
