@@ -55,7 +55,7 @@ data "aws_iam_policy_document" "deploy_policy" {
       "dynamodb:DescribeContinuousBackups",
       "dynamodb:ListTagsOfResource",
     ]
-    resources = ["arn:aws:dynamodb:*:${data.aws_caller_identity.current.account_id}:table/*"]
+    resources = ["arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/${aws_dynamodb_table.main.name}"]
   }
 
   statement {
@@ -114,6 +114,82 @@ data "aws_iam_policy_document" "deploy_policy" {
 
   # Write permissions for terraform apply
   statement {
+    # OAC actions require "*" — CloudFront OAC ARNs are not known at policy-definition time.
+    # UpdateDistribution is scoped to the specific distribution ARN below.
+    actions = [
+      "cloudfront:CreateOriginAccessControl",
+      "cloudfront:UpdateOriginAccessControl",
+      "cloudfront:DeleteOriginAccessControl",
+      "cloudfront:CreateInvalidation",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    actions   = ["cloudfront:UpdateDistribution"]
+    resources = [aws_cloudfront_distribution.main.arn]
+  }
+
+  statement {
+    actions = [
+      "dynamodb:CreateTable",
+      "dynamodb:UpdateTable",
+      "dynamodb:DeleteTable",
+      "dynamodb:UpdateTimeToLive",
+      "dynamodb:TagResource",
+      "dynamodb:UntagResource",
+    ]
+    resources = ["arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/${aws_dynamodb_table.main.name}"]
+  }
+
+  statement {
+    actions = [
+      "iam:PutRolePolicy",
+      "iam:DeleteRolePolicy",
+      "iam:UpdateAssumeRolePolicy",
+    ]
+    resources = [
+      aws_iam_role.deploy.arn,
+      aws_iam_role.lambda.arn,
+    ]
+  }
+
+  statement {
+    # OIDC provider actions require "*" — AWS does not support resource-level restrictions for OIDCP ARNs.
+    actions = [
+      "iam:CreateOpenIDConnectProvider",
+      "iam:UpdateOpenIDConnectProvider",
+      "iam:DeleteOpenIDConnectProvider",
+      "iam:TagOpenIDConnectProvider",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    actions = [
+      "lambda:UpdateFunctionCode",
+      "lambda:UpdateFunctionConfiguration",
+      "lambda:AddPermission",
+      "lambda:RemovePermission",
+      "lambda:CreateFunctionUrlConfig",
+      "lambda:UpdateFunctionUrlConfig",
+      "lambda:TagResource",
+    ]
+    resources = [aws_lambda_function.main.arn]
+  }
+
+  statement {
+    actions = [
+      "logs:CreateLogGroup",
+      "logs:PutRetentionPolicy",
+      "logs:DeleteLogGroup",
+      "logs:TagLogGroup",
+      "logs:TagResource",
+    ]
+    resources = ["arn:aws:logs:*:${data.aws_caller_identity.current.account_id}:log-group:*"]
+  }
+
+  statement {
     actions = [
       "s3:PutEncryptionConfiguration",
       "s3:PutBucketVersioning",
@@ -127,30 +203,10 @@ data "aws_iam_policy_document" "deploy_policy" {
   }
 
   statement {
-    actions = [
-      "cloudfront:CreateInvalidation",
-      "cloudfront:UpdateDistribution",
-    ]
-    resources = [aws_cloudfront_distribution.main.arn]
-  }
-
-  statement {
-    actions = [
-      "lambda:UpdateFunctionCode",
-      "lambda:UpdateFunctionConfiguration",
-      "lambda:AddPermission",
-      "lambda:RemovePermission",
-      "lambda:CreateFunctionUrlConfig",
-      "lambda:UpdateFunctionUrlConfig",
-    ]
-    resources = [aws_lambda_function.main.arn]
-  }
-
-  statement {
     # ssm:PutParameter allows CI to rotate OAuth credentials and admin IDs via terraform apply.
     # This is intentional — Terraform manages these values — but means anyone who can push to
     # main (currently only pwntato) can overwrite production secrets.
-    actions = ["ssm:PutParameter"]
+    actions = ["ssm:PutParameter", "ssm:AddTagsToResource"]
     resources = [
       aws_ssm_parameter.google_client_id.arn,
       aws_ssm_parameter.google_client_secret.arn,
