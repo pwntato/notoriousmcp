@@ -156,13 +156,22 @@ func tryRefresh(ctx context.Context, cfg Config, dbClient *db.Client, rawToken s
 		return "", "", err
 	}
 
-	if err = exchangeGoogleRefreshToken(ctx, cfg, storedToken); err != nil {
+	rotatedToken, err := exchangeGoogleRefreshToken(ctx, cfg, storedToken)
+	if err != nil {
 		// Token was revoked or otherwise rejected by Google — remove it so future
 		// refresh attempts fail fast without hitting Google unnecessarily.
 		if delErr := dbClient.DeleteRefreshToken(ctx, userID); delErr != nil {
 			log.Printf("auth: delete revoked refresh token for %s: %v", userID, delErr)
 		}
 		return "", "", ErrInvalidToken
+	}
+
+	// Google rotates refresh tokens for inactive users. Persist the new token so
+	// the stored value doesn't silently go stale.
+	if rotatedToken != "" && rotatedToken != storedToken {
+		if saveErr := dbClient.SaveRefreshToken(ctx, userID, rotatedToken); saveErr != nil {
+			log.Printf("auth: save rotated refresh token for %s: %v", userID, saveErr)
+		}
 	}
 
 	newToken, err = IssueAccessToken(cfg.TokenSecret, userID)
@@ -173,18 +182,10 @@ func tryRefresh(ctx context.Context, cfg Config, dbClient *db.Client, rawToken s
 }
 
 // exchangeGoogleRefreshToken performs a live token exchange with Google to
-// confirm the stored refresh token is still valid. It returns nil on success
-// and a non-nil error if Google rejects the token.
-//
-// The Google access token returned by src.Token() is intentionally discarded —
-// the exchange is performed only for liveness validation, not to obtain a
-// Google access token for API calls.
-//
-// Known gap: Google occasionally rotates refresh tokens, returning a new one
-// alongside the access token. That new token is not captured here, so the stored
-// DynamoDB value becomes stale after a rotation. In practice Google only rotates
-// for inactive tokens; regular callers see the same token indefinitely.
-func exchangeGoogleRefreshToken(ctx context.Context, cfg Config, refreshToken string) error {
+// confirm the stored refresh token is still valid. It returns the new refresh
+// token (non-empty only when Google rotates it) and a non-nil error if Google
+// rejects the token.
+func exchangeGoogleRefreshToken(ctx context.Context, cfg Config, refreshToken string) (newRefreshToken string, err error) {
 	endpoint := google.Endpoint
 	if cfg.GoogleTokenURL != "" {
 		endpoint = oauth2.Endpoint{TokenURL: cfg.GoogleTokenURL}
@@ -195,10 +196,11 @@ func exchangeGoogleRefreshToken(ctx context.Context, cfg Config, refreshToken st
 		Endpoint:     endpoint,
 	}
 	src := oauthCfg.TokenSource(ctx, &oauth2.Token{RefreshToken: refreshToken})
-	if _, err := src.Token(); err != nil {
-		return err
+	tok, err := src.Token()
+	if err != nil {
+		return "", err
 	}
-	return nil
+	return tok.RefreshToken, nil
 }
 
 // responseBuffer is a minimal http.ResponseWriter that captures the response

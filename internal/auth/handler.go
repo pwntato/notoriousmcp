@@ -292,23 +292,41 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, target, http.StatusFound)
 }
 
-// ValidateRedirectURI ensures the client redirect URI exactly matches the
-// server's configured redirect URL (scheme, host, path, and no query string).
-// RFC 6749 §3.1.2 requires exact URI matching. path.Clean neutralises
-// traversal sequences. Query strings are rejected on the client URI because
-// they are not part of a valid callback URL and could be used to smuggle state
-// via an open redirector.
+// ValidateRedirectURI ensures the client redirect URI is one of the two
+// allowed forms (RFC 6749 §3.1.2):
+//
+//  1. Exact match against the server's configured redirect URL (scheme, host,
+//     path, no query string). path.Clean neutralises traversal sequences.
+//
+//  2. http://127.0.0.1:<port>/callback — the loopback redirect form used by
+//     native/CLI OAuth clients (RFC 8252 §7.3). Any port is accepted; the path
+//     must be exactly "/callback". This lets MCP clients (e.g. Claude Code with
+//     --callback-port) register a fixed localhost port without needing a separate
+//     configured redirect URL for each client.
+//
+// Query strings are rejected on the client URI because they are not part of a
+// valid callback URL and could be used to smuggle state via an open redirector.
 func ValidateRedirectURI(configuredRedirectURL, clientRedirectURI string) error {
-	configured, err := url.Parse(configuredRedirectURL)
-	if err != nil {
-		return fmt.Errorf("invalid configured redirect URL: %w", err)
-	}
 	client, err := url.Parse(clientRedirectURI)
 	if err != nil {
 		return fmt.Errorf("invalid redirect_uri: %w", err)
 	}
 	if client.RawQuery != "" {
 		return fmt.Errorf("redirect_uri must not contain a query string")
+	}
+
+	// Loopback form: http://127.0.0.1:<port>/callback
+	if client.Scheme == "http" && client.Hostname() == "127.0.0.1" && path.Clean(client.Path) == "/callback" {
+		if client.Port() == "" {
+			return fmt.Errorf("redirect_uri loopback form requires an explicit port")
+		}
+		return nil
+	}
+
+	// Exact match against the configured redirect URL.
+	configured, err := url.Parse(configuredRedirectURL)
+	if err != nil {
+		return fmt.Errorf("invalid configured redirect URL: %w", err)
 	}
 	if configured.Scheme != client.Scheme ||
 		configured.Host != client.Host ||
