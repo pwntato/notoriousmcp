@@ -70,34 +70,53 @@ func TestAccessTokenMalformed(t *testing.T) {
 }
 
 func TestValidateRedirectURI(t *testing.T) {
+	configured := "https://notoriousmcp.com/auth/callback"
 	cases := []struct {
-		configured string
-		client     string
-		wantErr    bool
+		name    string
+		client  string
+		wantErr bool
 	}{
-		// Exact match — always allowed
-		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback", false},
-		// Different host — rejected
-		{"https://notoriousmcp.com/auth/callback", "https://evil.com/steal", true},
-		// Scheme mismatch — rejected
-		{"https://notoriousmcp.com/auth/callback", "http://notoriousmcp.com/auth/callback", true},
-		// Path outside configured prefix — rejected
-		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/other", true},
-		// Path traversal attempt — rejected
-		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback/../../steal", true},
-		// Prefix boundary: /auth/callback-extra must not match /auth/callback
-		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback-extra", true},
-		// Sub-paths also rejected — exact match only (RFC 6749 §3.1.2)
-		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback/sub", true},
-		// Trailing slash normalised by path.Clean — treated as equivalent
-		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback/", false},
-		// Query string on client URI — rejected (RFC 6749 requires exact match, no query)
-		{"https://notoriousmcp.com/auth/callback", "https://notoriousmcp.com/auth/callback?foo=bar", true},
+		// Exact match — always allowed.
+		{"exact match", "https://notoriousmcp.com/auth/callback", false},
+		// Different host — rejected.
+		{"evil domain", "https://evil.com/steal", true},
+		// Scheme mismatch — rejected.
+		{"scheme mismatch", "http://notoriousmcp.com/auth/callback", true},
+		// Path outside configured prefix — rejected.
+		{"wrong path", "https://notoriousmcp.com/other", true},
+		// Path traversal attempt — rejected.
+		{"path traversal", "https://notoriousmcp.com/auth/callback/../../steal", true},
+		// Prefix boundary: /auth/callback-extra must not match /auth/callback.
+		{"prefix boundary", "https://notoriousmcp.com/auth/callback-extra", true},
+		// Sub-paths also rejected — exact match only (RFC 6749 §3.1.2).
+		{"sub-path", "https://notoriousmcp.com/auth/callback/sub", true},
+		// Trailing slash normalised by path.Clean — treated as equivalent.
+		{"trailing slash", "https://notoriousmcp.com/auth/callback/", false},
+		// Query string on client URI — rejected (RFC 6749 requires exact match, no query).
+		{"query string", "https://notoriousmcp.com/auth/callback?foo=bar", true},
+
+		// Loopback form (RFC 8252 §7.3) — any port, must be http://127.0.0.1.
+		{"loopback port 54321", "http://127.0.0.1:54321/callback", false},
+		{"loopback port 8080", "http://127.0.0.1:8080/callback", false},
+		{"loopback port 1", "http://127.0.0.1:1/callback", false},
+		// Loopback without explicit port — rejected.
+		{"loopback no port", "http://127.0.0.1/callback", true},
+		// Wrong path on loopback — rejected.
+		{"loopback wrong path", "http://127.0.0.1:54321/other", true},
+		// Non-127.0.0.1 loopback addresses — rejected (not in Google's allowlist).
+		{"loopback ipv6", "http://[::1]:54321/callback", true},
+		{"localhost hostname", "http://localhost:54321/callback", true},
+		// HTTPS loopback — rejected (Google only registers http://127.0.0.1).
+		{"loopback https", "https://127.0.0.1:54321/callback", true},
+		// Loopback with query string — rejected.
+		{"loopback query string", "http://127.0.0.1:54321/callback?foo=bar", true},
 	}
 	for _, tc := range cases {
-		err := auth.ValidateRedirectURI(tc.configured, tc.client)
-		if (err != nil) != tc.wantErr {
-			t.Errorf("ValidateRedirectURI(%q, %q): err=%v wantErr=%v", tc.configured, tc.client, err, tc.wantErr)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			err := auth.ValidateRedirectURI(configured, tc.client)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("ValidateRedirectURI(%q): err=%v wantErr=%v", tc.client, err, tc.wantErr)
+			}
+		})
 	}
 }
