@@ -55,7 +55,7 @@ data "aws_iam_policy_document" "deploy_policy" {
       "dynamodb:DescribeContinuousBackups",
       "dynamodb:ListTagsOfResource",
     ]
-    resources = ["arn:aws:dynamodb:*:${data.aws_caller_identity.current.account_id}:table/*"]
+    resources = ["arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/${aws_dynamodb_table.main.name}"]
   }
 
   statement {
@@ -114,14 +114,20 @@ data "aws_iam_policy_document" "deploy_policy" {
 
   # Write permissions for terraform apply
   statement {
+    # OAC actions require "*" — CloudFront OAC ARNs are not known at policy-definition time.
+    # UpdateDistribution is scoped to the specific distribution ARN below.
     actions = [
       "cloudfront:CreateOriginAccessControl",
       "cloudfront:UpdateOriginAccessControl",
       "cloudfront:DeleteOriginAccessControl",
       "cloudfront:CreateInvalidation",
-      "cloudfront:UpdateDistribution",
     ]
     resources = ["*"]
+  }
+
+  statement {
+    actions   = ["cloudfront:UpdateDistribution"]
+    resources = [aws_cloudfront_distribution.main.arn]
   }
 
   statement {
@@ -133,7 +139,7 @@ data "aws_iam_policy_document" "deploy_policy" {
       "dynamodb:TagResource",
       "dynamodb:UntagResource",
     ]
-    resources = ["arn:aws:dynamodb:*:${data.aws_caller_identity.current.account_id}:table/*"]
+    resources = ["arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/${aws_dynamodb_table.main.name}"]
   }
 
   statement {
@@ -141,6 +147,16 @@ data "aws_iam_policy_document" "deploy_policy" {
       "iam:PutRolePolicy",
       "iam:DeleteRolePolicy",
       "iam:UpdateAssumeRolePolicy",
+    ]
+    resources = [
+      aws_iam_role.deploy.arn,
+      aws_iam_role.lambda.arn,
+    ]
+  }
+
+  statement {
+    # OIDC provider actions require "*" — AWS does not support resource-level restrictions for OIDCP ARNs.
+    actions = [
       "iam:CreateOpenIDConnectProvider",
       "iam:UpdateOpenIDConnectProvider",
       "iam:DeleteOpenIDConnectProvider",
