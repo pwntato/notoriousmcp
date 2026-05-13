@@ -68,16 +68,18 @@ resource "aws_cloudwatch_log_group" "lambda" {
   retention_in_days = 14
 }
 
+# reserved_concurrent_executions omitted — account limit is 10 total; reserving any
+# would drop unreserved below the 10-minimum and fail. The 10-total cap already
+# bounds abuse. Revisit if the account limit is raised.
 resource "aws_lambda_function" "main" {
-  function_name                  = "notoriousmcp-${var.environment}"
-  role                           = aws_iam_role.lambda.arn
-  handler                        = "bootstrap"
-  runtime                        = "provided.al2023"
-  architectures                  = ["arm64"]
-  filename                       = "${path.root}/../lambda.zip"
-  timeout                        = 30
-  memory_size                    = 256
-  reserved_concurrent_executions = 5
+  function_name = "notoriousmcp-${var.environment}"
+  role          = aws_iam_role.lambda.arn
+  handler       = "bootstrap"
+  runtime       = "provided.al2023"
+  architectures = ["arm64"]
+  filename      = "${path.root}/../lambda.zip"
+  timeout       = 30
+  memory_size   = 256
 
   environment {
     variables = {
