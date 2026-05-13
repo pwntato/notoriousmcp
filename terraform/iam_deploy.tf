@@ -73,6 +73,7 @@ data "aws_iam_policy_document" "deploy_policy" {
       "lambda:GetFunction",
       "lambda:GetFunctionCodeSigningConfig",
       "lambda:GetFunctionUrlConfig",
+      "lambda:GetPolicy",
       "lambda:ListVersionsByFunction",
     ]
     resources = [aws_lambda_function.main.arn]
