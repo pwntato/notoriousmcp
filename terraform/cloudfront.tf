@@ -3,13 +3,6 @@ locals {
   cf_origin_id    = "lambda"
 }
 
-resource "aws_cloudfront_origin_access_control" "lambda" {
-  name                              = "notoriousmcp-lambda-oac-${var.environment}"
-  origin_access_control_origin_type = "lambda"
-  signing_behavior                  = "always"
-  signing_protocol                  = "sigv4"
-}
-
 resource "aws_cloudfront_distribution" "main" {
   enabled         = true
   is_ipv6_enabled = true
@@ -18,15 +11,14 @@ resource "aws_cloudfront_distribution" "main" {
   aliases = var.domain_name != "" ? [var.domain_name] : []
 
   origin {
-    domain_name              = local.lambda_url_host
-    origin_id                = local.cf_origin_id
-    origin_access_control_id = aws_cloudfront_origin_access_control.lambda.id
+    domain_name = local.lambda_url_host
+    origin_id   = local.cf_origin_id
 
-    # Terraform requires s3_origin_config or custom_origin_config; use an empty
-    # s3_origin_config (no OAI) so the provider is satisfied without adding a
-    # custom_origin_config block, which breaks OAC signing for Lambda URL origins.
-    s3_origin_config {
-      origin_access_identity = ""
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
     }
   }
 

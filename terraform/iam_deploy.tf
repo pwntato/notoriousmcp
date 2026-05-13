@@ -42,7 +42,6 @@ data "aws_iam_policy_document" "deploy_policy" {
   statement {
     actions = [
       "cloudfront:GetDistribution",
-      "cloudfront:GetOriginAccessControl",
       "cloudfront:ListTagsForResource",
     ]
     resources = ["*"]
@@ -74,7 +73,6 @@ data "aws_iam_policy_document" "deploy_policy" {
       "lambda:GetFunction",
       "lambda:GetFunctionCodeSigningConfig",
       "lambda:GetFunctionUrlConfig",
-      "lambda:GetPolicy",
       "lambda:ListVersionsByFunction",
     ]
     resources = [aws_lambda_function.main.arn]
@@ -114,19 +112,10 @@ data "aws_iam_policy_document" "deploy_policy" {
 
   # Write permissions for terraform apply
   statement {
-    # OAC actions require "*" — CloudFront OAC ARNs are not known at policy-definition time.
-    # UpdateDistribution is scoped to the specific distribution ARN below.
     actions = [
-      "cloudfront:CreateOriginAccessControl",
-      "cloudfront:UpdateOriginAccessControl",
-      "cloudfront:DeleteOriginAccessControl",
       "cloudfront:CreateInvalidation",
+      "cloudfront:UpdateDistribution",
     ]
-    resources = ["*"]
-  }
-
-  statement {
-    actions   = ["cloudfront:UpdateDistribution"]
     resources = [aws_cloudfront_distribution.main.arn]
   }
 
@@ -169,8 +158,6 @@ data "aws_iam_policy_document" "deploy_policy" {
     actions = [
       "lambda:UpdateFunctionCode",
       "lambda:UpdateFunctionConfiguration",
-      "lambda:AddPermission",
-      "lambda:RemovePermission",
       "lambda:CreateFunctionUrlConfig",
       "lambda:UpdateFunctionUrlConfig",
       "lambda:TagResource",
