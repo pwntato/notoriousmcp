@@ -69,6 +69,7 @@ func init() {
 		AdminGoogleIDs: filterEmpty(strings.Split(adminIDsRaw, ",")),
 		TokenSecret:    []byte(tokenSecretRaw),
 		TrustProxy:     true,
+		PublicBaseURL:  os.Getenv("PUBLIC_BASE_URL"),
 	}
 
 	authHandler := auth.New(authCfg, dbClient)
