@@ -43,6 +43,9 @@ data "aws_iam_policy_document" "deploy_policy" {
     actions = [
       "cloudfront:GetDistribution",
       "cloudfront:ListTagsForResource",
+      "cloudfront:GetFunction",
+      "cloudfront:DescribeFunction",
+      "cloudfront:ListFunctions",
     ]
     resources = ["*"]
   }
@@ -118,6 +121,18 @@ data "aws_iam_policy_document" "deploy_policy" {
       "cloudfront:UpdateDistribution",
     ]
     resources = [aws_cloudfront_distribution.main.arn]
+  }
+
+  statement {
+    actions = [
+      "cloudfront:CreateFunction",
+      "cloudfront:UpdateFunction",
+      "cloudfront:DeleteFunction",
+      "cloudfront:PublishFunction",
+      "cloudfront:TagResource",
+      "cloudfront:UntagResource",
+    ]
+    resources = ["arn:aws:cloudfront::${data.aws_caller_identity.current.account_id}:function/notoriousmcp-*"]
   }
 
   statement {
