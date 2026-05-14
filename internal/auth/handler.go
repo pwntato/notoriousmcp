@@ -88,11 +88,7 @@ func requestScheme(r *http.Request, trustProxy bool) string {
 
 // wellKnown serves the OAuth 2.0 authorization server metadata required by the MCP spec.
 func (h *Handler) wellKnown(w http.ResponseWriter, r *http.Request) {
-	base := h.cfg.PublicBaseURL
-	if base == "" {
-		base = requestScheme(r, h.cfg.TrustProxy) + "://" + r.Host
-	}
-	base = strings.TrimRight(base, "/")
+	base := h.cfg.publicBase(r)
 	meta := map[string]any{
 		"issuer":                   base,
 		"authorization_endpoint":   base + "/auth/login",
@@ -109,11 +105,7 @@ func (h *Handler) wellKnown(w http.ResponseWriter, r *http.Request) {
 // Claude Code's MCP SDK reads this document (linked from the WWW-Authenticate header
 // on 401 responses) to discover the authorization server before starting OAuth.
 func (h *Handler) protectedResource(w http.ResponseWriter, r *http.Request) {
-	base := h.cfg.PublicBaseURL
-	if base == "" {
-		base = requestScheme(r, h.cfg.TrustProxy) + "://" + r.Host
-	}
-	base = strings.TrimRight(base, "/")
+	base := h.cfg.publicBase(r)
 	meta := map[string]any{
 		"resource":               base,
 		"authorization_servers": []string{base},

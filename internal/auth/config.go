@@ -1,6 +1,10 @@
 package auth
 
-import "fmt"
+import (
+	"fmt"
+	"net/http"
+	"strings"
+)
 
 // Config holds OAuth credentials and server settings needed by the auth layer.
 // Call Validate() before passing to New().
@@ -22,6 +26,15 @@ type Config struct {
 	// GoogleTokenURL overrides Google's token endpoint. Empty means use the
 	// default (google.Endpoint). Set in tests only to point at a fake server.
 	GoogleTokenURL string
+}
+
+// publicBase returns the canonical public base URL with no trailing slash.
+// Uses PublicBaseURL when set; otherwise derives it from the request.
+func (c Config) publicBase(r *http.Request) string {
+	if c.PublicBaseURL != "" {
+		return strings.TrimRight(c.PublicBaseURL, "/")
+	}
+	return strings.TrimRight(requestScheme(r, c.TrustProxy)+"://"+r.Host, "/")
 }
 
 // Validate returns an error if any required field is missing or too short.

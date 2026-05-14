@@ -271,10 +271,6 @@ func validSignatureUserID(secret []byte, token string) (string, error) {
 // (OAuth 2.0 Protected Resource Metadata). Claude Code's MCP SDK reads the
 // resource_metadata URL to discover the authorization server before starting OAuth.
 func setWWWAuthenticate(w http.ResponseWriter, r *http.Request, cfg Config) {
-	base := cfg.PublicBaseURL
-	if base == "" {
-		base = requestScheme(r, cfg.TrustProxy) + "://" + r.Host
-	}
-	base = strings.TrimRight(base, "/")
+	base := cfg.publicBase(r)
 	w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+base+`/.well-known/oauth-protected-resource"`)
 }
