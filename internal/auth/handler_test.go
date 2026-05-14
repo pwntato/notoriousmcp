@@ -59,6 +59,9 @@ func TestWellKnown(t *testing.T) {
 	if meta["token_endpoint"] != "http://example.com/auth/token" {
 		t.Errorf("token_endpoint: got %v", meta["token_endpoint"])
 	}
+	if meta["registration_endpoint"] != "http://example.com/register" {
+		t.Errorf("registration_endpoint: got %v", meta["registration_endpoint"])
+	}
 }
 
 func TestWellKnownXForwardedProto(t *testing.T) {
@@ -283,6 +286,116 @@ func TestTokenEndpointWrongGrantType(t *testing.T) {
 	}
 	if body["error"] != "unsupported_grant_type" {
 		t.Errorf("error: got %q want unsupported_grant_type", body["error"])
+	}
+}
+
+func TestRegisterValidLoopback(t *testing.T) {
+	h, _ := newTestHandlerWithDB(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"redirect_uris":["http://127.0.0.1:54321/callback"],"client_name":"Claude Code","token_endpoint_auth_method":"none"}`
+	req := httptest.NewRequest("POST", "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status: got %d want 201, body: %s", w.Code, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type: got %q want application/json", ct)
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["client_id"] == "" {
+		t.Error("client_id should be non-empty")
+	}
+	if resp["client_id_issued_at"] == nil {
+		t.Error("client_id_issued_at should be present")
+	}
+	uris, ok := resp["redirect_uris"].([]any)
+	if !ok || len(uris) != 1 || uris[0] != "http://127.0.0.1:54321/callback" {
+		t.Errorf("redirect_uris: got %v", resp["redirect_uris"])
+	}
+	if resp["token_endpoint_auth_method"] != "none" {
+		t.Errorf("token_endpoint_auth_method: got %v", resp["token_endpoint_auth_method"])
+	}
+}
+
+func TestRegisterInvalidRedirectURI(t *testing.T) {
+	h := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"redirect_uris":["https://evil.com/steal"]}`
+	req := httptest.NewRequest("POST", "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want 400", w.Code)
+	}
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["error"] != "invalid_redirect_uri" {
+		t.Errorf("error: got %q want invalid_redirect_uri", resp["error"])
+	}
+}
+
+func TestRegisterMissingRedirectURIs(t *testing.T) {
+	h := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"client_name":"No URIs"}`
+	req := httptest.NewRequest("POST", "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want 400", w.Code)
+	}
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["error"] != "invalid_redirect_uri" {
+		t.Errorf("error: got %q want invalid_redirect_uri", resp["error"])
+	}
+}
+
+func TestRegisterDefaultsAuthMethod(t *testing.T) {
+	h, _ := newTestHandlerWithDB(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"redirect_uris":["http://127.0.0.1:8080/callback"]}`
+	req := httptest.NewRequest("POST", "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status: got %d want 201", w.Code)
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["token_endpoint_auth_method"] != "none" {
+		t.Errorf("token_endpoint_auth_method: got %v want none", resp["token_endpoint_auth_method"])
 	}
 }
 

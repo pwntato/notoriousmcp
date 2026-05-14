@@ -70,7 +70,8 @@ func main() {
 func publicRouter(public, protected http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/auth/") ||
-			strings.HasPrefix(r.URL.Path, "/.well-known/") {
+			strings.HasPrefix(r.URL.Path, "/.well-known/") ||
+			r.URL.Path == "/register" {
 			public.ServeHTTP(w, r)
 			return
 		}

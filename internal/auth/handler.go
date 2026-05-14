@@ -67,6 +67,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /auth/login", h.login)
 	mux.HandleFunc("GET /auth/callback", h.callback)
 	mux.HandleFunc("POST /auth/token", h.token)
+	mux.HandleFunc("POST /register", h.register)
 }
 
 // requestScheme returns https when TLS is active or, if trustProxy is true,
@@ -91,6 +92,7 @@ func (h *Handler) wellKnown(w http.ResponseWriter, r *http.Request) {
 		"issuer":                   base,
 		"authorization_endpoint":   base + "/auth/login",
 		"token_endpoint":           base + "/auth/token",
+		"registration_endpoint":    base + "/register",
 		"response_types_supported": []string{"code"},
 		"grant_types_supported":    []string{"authorization_code"},
 	}
@@ -346,6 +348,76 @@ func writeJSONError(w http.ResponseWriter, status int, errCode string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": errCode})
+}
+
+// registerRequest is the RFC 7591 §2 dynamic client registration request body.
+type registerRequest struct {
+	RedirectURIs              []string `json:"redirect_uris"`
+	ClientName                string   `json:"client_name"`
+	TokenEndpointAuthMethod   string   `json:"token_endpoint_auth_method"`
+}
+
+// registerResponse is the RFC 7591 §3.2.1 successful registration response.
+type registerResponse struct {
+	ClientID                string   `json:"client_id"`
+	ClientIDIssuedAt        int64    `json:"client_id_issued_at"`
+	RedirectURIs            []string `json:"redirect_uris"`
+	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
+}
+
+// register handles POST /register — RFC 7591 dynamic client registration.
+// Public clients (MCP CLI tools) register a loopback redirect URI and receive
+// a client_id they use in subsequent authorization requests. No client secret
+// is issued because Claude Code uses PKCE (public client flow).
+func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	limited := &io.LimitedReader{R: r.Body, N: 64 * 1024}
+	var req registerRequest
+	if err := json.NewDecoder(limited).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_client_metadata")
+		return
+	}
+
+	if len(req.RedirectURIs) == 0 {
+		writeJSONError(w, http.StatusBadRequest, "invalid_redirect_uri")
+		return
+	}
+
+	// Validate every redirect URI before accepting the registration.
+	for _, uri := range req.RedirectURIs {
+		if err := ValidateRedirectURI(h.cfg.RedirectURL, uri); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid_redirect_uri")
+			return
+		}
+	}
+
+	clientID, err := generateRandomCode()
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if err := h.db.SaveClient(ctx, clientID, req.RedirectURIs[0], req.ClientName); err != nil {
+		log.Printf("register: save client: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	authMethod := req.TokenEndpointAuthMethod
+	if authMethod == "" {
+		authMethod = "none"
+	}
+
+	resp := registerResponse{
+		ClientID:                clientID,
+		ClientIDIssuedAt:        time.Now().Unix(),
+		RedirectURIs:            req.RedirectURIs,
+		TokenEndpointAuthMethod: authMethod,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // token handles POST /auth/token — the RFC 6749 §4.1.3 token endpoint.
