@@ -251,6 +251,20 @@ Then:
 
 Push to `main` — GitHub Actions builds the ARM64 Lambda binary, runs `terraform apply`, and updates the function code automatically.
 
+**IAM permission changes caveat:** When a PR adds new IAM permissions to the deploy role (`aws_iam_role_policy.deploy` in `iam_deploy.tf`), CI cannot apply those changes — the deploy role lacks the new permissions it's trying to grant itself. Apply that one resource locally with admin credentials before merging:
+
+```bash
+cd terraform
+terraform init \
+  -backend-config="bucket=notoriousmcp-tfstate-<YOUR_AWS_ACCOUNT_ID>" \
+  -backend-config="dynamodb_table=notoriousmcp-tfstate-<YOUR_AWS_ACCOUNT_ID>-lock" \
+  -backend-config="region=us-east-1"
+
+terraform apply -target=aws_iam_role_policy.deploy
+```
+
+After that, CI can apply the rest of the PR normally.
+
 ### Optional: Custom Domain
 
 To use a custom domain instead of the CloudFront URL, add domain variables to your `terraform apply`. All `domain_contact_*` fields are required when `domain_name` is set:
