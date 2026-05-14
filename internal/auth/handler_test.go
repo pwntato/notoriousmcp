@@ -59,6 +59,9 @@ func TestWellKnown(t *testing.T) {
 	if meta["token_endpoint"] != "http://example.com/auth/token" {
 		t.Errorf("token_endpoint: got %v", meta["token_endpoint"])
 	}
+	if meta["registration_endpoint"] != "http://example.com/register" {
+		t.Errorf("registration_endpoint: got %v", meta["registration_endpoint"])
+	}
 }
 
 func TestWellKnownXForwardedProto(t *testing.T) {
@@ -286,6 +289,189 @@ func TestTokenEndpointWrongGrantType(t *testing.T) {
 	}
 }
 
+func TestRegisterValidLoopback(t *testing.T) {
+	h, _ := newTestHandlerWithDB(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"redirect_uris":["http://127.0.0.1:54321/callback"],"client_name":"Claude Code","token_endpoint_auth_method":"none"}`
+	req := httptest.NewRequest("POST", "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status: got %d want 201, body: %s", w.Code, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type: got %q want application/json", ct)
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["client_id"] == "" {
+		t.Error("client_id should be non-empty")
+	}
+	// JSON numbers decode to float64 in map[string]any.
+	issuedAt, ok := resp["client_id_issued_at"].(float64)
+	if !ok || issuedAt <= 0 {
+		t.Errorf("client_id_issued_at: got %v (%T), want positive number", resp["client_id_issued_at"], resp["client_id_issued_at"])
+	}
+	uris, ok := resp["redirect_uris"].([]any)
+	if !ok || len(uris) != 1 || uris[0] != "http://127.0.0.1:54321/callback" {
+		t.Errorf("redirect_uris: got %v", resp["redirect_uris"])
+	}
+	if resp["token_endpoint_auth_method"] != "none" {
+		t.Errorf("token_endpoint_auth_method: got %v", resp["token_endpoint_auth_method"])
+	}
+}
+
+func TestRegisterMalformedJSON(t *testing.T) {
+	h := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("POST", "/register", strings.NewReader("{not valid json"))
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want 400 for malformed JSON", w.Code)
+	}
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["error"] != "invalid_client_metadata" {
+		t.Errorf("error: got %q want invalid_client_metadata", resp["error"])
+	}
+}
+
+func TestRegisterRejectsUnsupportedAuthMethod(t *testing.T) {
+	h := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"redirect_uris":["http://127.0.0.1:54321/callback"],"token_endpoint_auth_method":"client_secret_basic"}`
+	req := httptest.NewRequest("POST", "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want 400 for unsupported auth method", w.Code)
+	}
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["error"] != "invalid_client_metadata" {
+		t.Errorf("error: got %q want invalid_client_metadata", resp["error"])
+	}
+}
+
+func TestRegisterRejectsMultipleRedirectURIs(t *testing.T) {
+	h := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"redirect_uris":["http://127.0.0.1:54321/callback","http://127.0.0.1:9999/callback"]}`
+	req := httptest.NewRequest("POST", "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want 400 for multiple redirect_uris", w.Code)
+	}
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["error"] != "invalid_redirect_uri" {
+		t.Errorf("error: got %q want invalid_redirect_uri", resp["error"])
+	}
+}
+
+func TestRegisterInvalidRedirectURI(t *testing.T) {
+	h := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"redirect_uris":["https://evil.com/steal"]}`
+	req := httptest.NewRequest("POST", "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want 400", w.Code)
+	}
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["error"] != "invalid_redirect_uri" {
+		t.Errorf("error: got %q want invalid_redirect_uri", resp["error"])
+	}
+}
+
+func TestRegisterMissingRedirectURIs(t *testing.T) {
+	h := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"client_name":"No URIs"}`
+	req := httptest.NewRequest("POST", "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want 400", w.Code)
+	}
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["error"] != "invalid_redirect_uri" {
+		t.Errorf("error: got %q want invalid_redirect_uri", resp["error"])
+	}
+}
+
+func TestRegisterDefaultsAuthMethod(t *testing.T) {
+	h, _ := newTestHandlerWithDB(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"redirect_uris":["http://127.0.0.1:8080/callback"]}`
+	req := httptest.NewRequest("POST", "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status: got %d want 201", w.Code)
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["token_endpoint_auth_method"] != "none" {
+		t.Errorf("token_endpoint_auth_method: got %v want none", resp["token_endpoint_auth_method"])
+	}
+}
+
 // ---- integration tests (require DYNAMODB_ENDPOINT) ----
 
 func newTestHandlerWithDB(t *testing.T) (*auth.Handler, *db.Client) {
@@ -299,6 +485,63 @@ func newTestHandlerWithDB(t *testing.T) (*auth.Handler, *db.Client) {
 		TrustProxy:   true,
 	}
 	return auth.New(cfg, dbClient), dbClient
+}
+
+func TestLoginRejectsUnknownClientID(t *testing.T) {
+	h, _ := newTestHandlerWithDB(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/auth/login?client_id=no-such-client&redirect_uri=http://127.0.0.1:54321/callback", nil)
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status: got %d want 401 for unknown client_id", w.Code)
+	}
+}
+
+func TestLoginRejectsClientIDRedirectURIMismatch(t *testing.T) {
+	h, dbClient := newTestHandlerWithDB(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	clientID := "client-" + randUID()
+	if err := dbClient.SaveClient(context.Background(), clientID, "http://127.0.0.1:54321/callback", "test"); err != nil {
+		t.Fatalf("save client: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/auth/login?client_id="+clientID+"&redirect_uri=http://127.0.0.1:9999/callback", nil)
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d want 400 for redirect_uri mismatch", w.Code)
+	}
+}
+
+func TestLoginAcceptsRegisteredClientID(t *testing.T) {
+	h, dbClient := newTestHandlerWithDB(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	clientID := "client-" + randUID()
+	redirectURI := "http://127.0.0.1:54321/callback"
+	if err := dbClient.SaveClient(context.Background(), clientID, redirectURI, "test"); err != nil {
+		t.Fatalf("save client: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/auth/login?client_id="+clientID+"&redirect_uri="+redirectURI, nil)
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	// Proceeds to Google redirect (302) — client_id accepted.
+	if w.Code != http.StatusFound {
+		t.Errorf("status: got %d want 302 for valid registered client_id", w.Code)
+	}
 }
 
 func TestTokenEndpointRoundTrip(t *testing.T) {

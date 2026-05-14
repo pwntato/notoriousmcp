@@ -67,6 +67,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /auth/login", h.login)
 	mux.HandleFunc("GET /auth/callback", h.callback)
 	mux.HandleFunc("POST /auth/token", h.token)
+	mux.HandleFunc("POST /register", h.register)
 }
 
 // requestScheme returns https when TLS is active or, if trustProxy is true,
@@ -91,6 +92,7 @@ func (h *Handler) wellKnown(w http.ResponseWriter, r *http.Request) {
 		"issuer":                   base,
 		"authorization_endpoint":   base + "/auth/login",
 		"token_endpoint":           base + "/auth/token",
+		"registration_endpoint":    base + "/register",
 		"response_types_supported": []string{"code"},
 		"grant_types_supported":    []string{"authorization_code"},
 	}
@@ -107,6 +109,7 @@ type oauthStatePayload struct {
 
 // login initiates the OAuth flow by redirecting to Google.
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	clientRedirectURI := r.URL.Query().Get("redirect_uri")
 
 	// Validate redirect_uri against the configured redirect URL origin to
@@ -114,6 +117,27 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	if clientRedirectURI != "" {
 		if err := ValidateRedirectURI(h.cfg.RedirectURL, clientRedirectURI); err != nil {
 			http.Error(w, "invalid redirect_uri", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// If a client_id is provided (dynamically registered client), verify it
+	// exists in the registry and that its stored redirect URI matches.
+	// Clients that omit client_id are allowed through for backwards compatibility
+	// (pre-registration flows and direct token use); the redirect_uri check above
+	// is still the primary open-redirect guard for those callers.
+	if clientID := r.URL.Query().Get("client_id"); clientID != "" {
+		registered, err := h.db.GetClient(ctx, clientID)
+		if errors.Is(err, db.ErrNotFound) {
+			http.Error(w, "invalid client_id", http.StatusUnauthorized)
+			return
+		}
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if clientRedirectURI != "" && registered.RedirectURI != clientRedirectURI {
+			http.Error(w, "redirect_uri mismatch", http.StatusBadRequest)
 			return
 		}
 	}
@@ -346,6 +370,86 @@ func writeJSONError(w http.ResponseWriter, status int, errCode string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": errCode})
+}
+
+// registerRequest is a subset of the RFC 7591 §2 dynamic client registration request body.
+type registerRequest struct {
+	RedirectURIs            []string `json:"redirect_uris"`
+	ClientName              string   `json:"client_name"`
+	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
+}
+
+// registerResponse is the RFC 7591 §3.2.1 successful registration response.
+type registerResponse struct {
+	ClientID                string   `json:"client_id"`
+	ClientIDIssuedAt        int64    `json:"client_id_issued_at"`
+	RedirectURIs            []string `json:"redirect_uris"`
+	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
+}
+
+// register handles POST /register — RFC 7591 dynamic client registration.
+// Public clients (MCP CLI tools) register a loopback redirect URI and receive
+// a client_id they use in subsequent authorization requests. No client secret
+// is issued because Claude Code uses PKCE (public client flow).
+//
+// Rate limiting: this endpoint is unauthenticated. Abuse (flooding registrations)
+// is mitigated by the loopback-only redirect URI policy — invalid URIs are
+// rejected before any DynamoDB write. CloudFront/WAF provides the IP-level
+// rate limit layer; no in-process limiting is applied.
+func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	limited := &io.LimitedReader{R: r.Body, N: 64 * 1024}
+	var req registerRequest
+	if err := json.NewDecoder(limited).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_client_metadata")
+		return
+	}
+
+	if len(req.RedirectURIs) == 0 {
+		writeJSONError(w, http.StatusBadRequest, "invalid_redirect_uri")
+		return
+	}
+	// Only one redirect URI is supported per registration. Accepting multiple
+	// while only persisting one would create a mismatch at /auth/login.
+	if len(req.RedirectURIs) > 1 {
+		writeJSONError(w, http.StatusBadRequest, "invalid_redirect_uri")
+		return
+	}
+
+	if err := ValidateRedirectURI(h.cfg.RedirectURL, req.RedirectURIs[0]); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_redirect_uri")
+		return
+	}
+
+	// Only "none" is supported (public client / PKCE flow). Reject other methods
+	// rather than echo them back, which would imply support we don't provide.
+	if req.TokenEndpointAuthMethod != "" && req.TokenEndpointAuthMethod != "none" {
+		writeJSONError(w, http.StatusBadRequest, "invalid_client_metadata")
+		return
+	}
+
+	clientID, err := generateRandomCode()
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if err := h.db.SaveClient(ctx, clientID, req.RedirectURIs[0], req.ClientName); err != nil {
+		log.Printf("register: save client: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := registerResponse{
+		ClientID:                clientID,
+		ClientIDIssuedAt:        time.Now().Unix(),
+		RedirectURIs:            req.RedirectURIs,
+		TokenEndpointAuthMethod: "none",
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // token handles POST /auth/token — the RFC 6749 §4.1.3 token endpoint.
