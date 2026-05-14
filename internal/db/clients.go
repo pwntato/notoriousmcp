@@ -36,15 +36,15 @@ type RegisteredClient struct {
 
 // SaveClient persists a dynamically registered OAuth client (RFC 7591).
 func (c *Client) SaveClient(ctx context.Context, clientID, redirectURI, clientName string) error {
-	now := time.Now().Unix()
+	now := time.Now()
 	rec := clientRecord{
 		PK:          clientPK(clientID),
 		SK:          clientSK,
 		ClientID:    clientID,
 		ClientName:  clientName,
 		RedirectURI: redirectURI,
-		IssuedAt:    now,
-		ExpiresAt:   time.Now().Add(clientTTL).Unix(),
+		IssuedAt:    now.Unix(),
+		ExpiresAt:   now.Add(clientTTL).Unix(),
 	}
 	item, err := attributevalue.MarshalMap(rec)
 	if err != nil {

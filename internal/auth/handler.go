@@ -109,6 +109,7 @@ type oauthStatePayload struct {
 
 // login initiates the OAuth flow by redirecting to Google.
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	clientRedirectURI := r.URL.Query().Get("redirect_uri")
 
 	// Validate redirect_uri against the configured redirect URL origin to
@@ -116,6 +117,20 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	if clientRedirectURI != "" {
 		if err := ValidateRedirectURI(h.cfg.RedirectURL, clientRedirectURI); err != nil {
 			http.Error(w, "invalid redirect_uri", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// If a client_id is provided (dynamically registered client), verify it
+	// exists in the registry and that its stored redirect URI matches.
+	if clientID := r.URL.Query().Get("client_id"); clientID != "" {
+		registered, err := h.db.GetClient(ctx, clientID)
+		if err != nil {
+			http.Error(w, "invalid client_id", http.StatusUnauthorized)
+			return
+		}
+		if clientRedirectURI != "" && registered.RedirectURI != clientRedirectURI {
+			http.Error(w, "redirect_uri mismatch", http.StatusBadRequest)
 			return
 		}
 	}
@@ -383,13 +398,16 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid_redirect_uri")
 		return
 	}
+	// Only one redirect URI is supported per registration. Accepting multiple
+	// while only persisting one would create a mismatch at /auth/login.
+	if len(req.RedirectURIs) > 1 {
+		writeJSONError(w, http.StatusBadRequest, "invalid_redirect_uri")
+		return
+	}
 
-	// Validate every redirect URI before accepting the registration.
-	for _, uri := range req.RedirectURIs {
-		if err := ValidateRedirectURI(h.cfg.RedirectURL, uri); err != nil {
-			writeJSONError(w, http.StatusBadRequest, "invalid_redirect_uri")
-			return
-		}
+	if err := ValidateRedirectURI(h.cfg.RedirectURL, req.RedirectURIs[0]); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_redirect_uri")
+		return
 	}
 
 	clientID, err := generateRandomCode()
