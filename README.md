@@ -43,12 +43,15 @@ Lambda Function URL  (AuthType: NONE, invoke mode: BUFFERED)
     └── SSM       (secrets fetched at cold start — never in env vars)
 ```
 
-**Auth flow:**
-1. Client visits `/auth/login` → redirected to Google
-2. Google redirects to `/auth/callback` with an authorization code
-3. Server exchanges the code for Google tokens, creates/updates a user record in DynamoDB
-4. Client POSTs the exchange code to `/auth/token` → receives an opaque Bearer token (1h TTL)
-5. On expiry, server issues a new token via `X-New-Token` response header — clients auto-refresh
+**Auth flow (RFC 7591 + RFC 9728 — used by Claude Code and other MCP clients):**
+1. Client discovers auth server via `GET /.well-known/oauth-authorization-server`
+2. Client registers itself via `POST /register` (RFC 7591 dynamic client registration)
+3. Client opens a browser to `/auth/login` → redirected to Google
+4. Google redirects to `/auth/callback`; server exchanges the code for Google tokens, creates/updates user in DynamoDB, then redirects client to its local callback with an exchange code
+5. Client POSTs the exchange code to `/auth/token` → receives an opaque Bearer token (1h TTL)
+6. On expiry, server issues a new token via `X-New-Token` response header — clients auto-refresh
+
+**Manual token flow** (for scripting/testing): visit `/auth/login` in a browser, complete the Google flow, copy the `?code=` from the redirect URL, then POST it to `/auth/token`.
 
 New accounts start as **pending** and can only call `check_status`. An admin must promote them to **user** or **admin**.
 
@@ -303,36 +306,37 @@ update_user(user_id="<google-sub>", status="user")
 
 ## Step 7 — Connect an MCP Client
 
-Add to your MCP client config (e.g. Claude Code's `.claude/settings.json`):
+### Claude Code (recommended)
 
-```json
-{
-  "mcpServers": {
-    "notoriousmcp": {
-      "type": "http",
-      "url": "https://<your-cloudfront-domain>/mcp",
-      "headers": {
-        "Authorization": "Bearer <your-token>"
-      }
-    }
-  }
-}
+Run once to register the server:
+
+```bash
+claude mcp add --transport http --scope user --callback-port 54321 notoriousmcp https://<your-cloudfront-domain>/mcp
 ```
 
-> **Note:** RFC 7591 dynamic client registration is not yet implemented ([#74](https://github.com/pwntato/notoriousmcp/issues/74)). MCP clients that require it (including Claude Code's `claude mcp add --transport http` OAuth flow) will fail to connect until that issue is resolved. In the meantime, obtain a token manually using the steps below and supply it as a static Bearer header.
+Then open `/mcp` in Claude Code, select **notoriousmcp → Authenticate**, and complete the Google OAuth flow in the browser that opens. Claude Code handles registration, token exchange, and auto-refresh automatically.
 
-To get a token:
+### Other MCP clients
+
+Any MCP client that supports RFC 7591 dynamic client registration and OAuth 2.0 authorization code flow can connect. Point it at:
+
+- **MCP endpoint:** `https://<your-cloudfront-domain>/mcp`
+- **Auth server discovery:** `https://<your-cloudfront-domain>/.well-known/oauth-authorization-server`
+- **Client registration:** `POST https://<your-cloudfront-domain>/register`
+
+### Manual token (scripting/testing)
+
 1. Visit `https://<your-cloudfront-domain>/auth/login` in a browser
-2. Complete the Google OAuth flow — you'll be redirected to your redirect URI with `?code=<exchange-code>` appended. In local dev the server isn't listening on the redirect URI, so the browser will show a connection error — that's expected. The code is in the URL bar. Copy it. In production the server handles the redirect automatically and you won't see this step.
-3. POST the exchange code to get a Bearer token. The `redirect_uri` must exactly match the one registered in Google Cloud Console (same as your `REDIRECT_URL` secret):
+2. Complete the Google OAuth flow — you'll land on your redirect URI with `?code=<exchange-code>` in the URL
+3. POST the exchange code:
    ```bash
    curl -X POST https://<your-cloudfront-domain>/auth/token \
      -H "Content-Type: application/json" \
      -d '{"code": "<exchange-code>", "redirect_uri": "https://<your-cloudfront-domain>/auth/callback"}'
    ```
-4. Use the returned token in your MCP client config
+4. Use the returned token as a static Bearer header in your client config
 
-Tokens expire after 1 hour. When a token expires, the server issues a new one via the `X-New-Token` response header — compatible MCP clients handle this automatically.
+Tokens expire after 1 hour. The server issues a fresh token via `X-New-Token` on any authenticated request made with an expired-but-otherwise-valid token — clients that handle this header auto-refresh transparently.
 
 To load the skill file (teaches the LLM how to use the tools effectively), add it to `.claude/settings.json` (project) or `~/.claude/settings.json` (global):
 
