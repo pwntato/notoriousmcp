@@ -748,8 +748,7 @@ func s256Challenge(verifier string) string {
 }
 
 func TestTokenEndpointPKCEValid(t *testing.T) {
-	dbClient := newTestDBClient(t)
-	h := newTestHandler(t)
+	h, dbClient := newTestHandlerWithDB(t)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
@@ -775,8 +774,7 @@ func TestTokenEndpointPKCEValid(t *testing.T) {
 }
 
 func TestTokenEndpointPKCEMissingVerifier(t *testing.T) {
-	dbClient := newTestDBClient(t)
-	h := newTestHandler(t)
+	h, dbClient := newTestHandlerWithDB(t)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
@@ -801,8 +799,7 @@ func TestTokenEndpointPKCEMissingVerifier(t *testing.T) {
 }
 
 func TestTokenEndpointPKCEWrongVerifier(t *testing.T) {
-	dbClient := newTestDBClient(t)
-	h := newTestHandler(t)
+	h, dbClient := newTestHandlerWithDB(t)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
