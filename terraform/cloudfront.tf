@@ -1,6 +1,7 @@
 locals {
   lambda_url_host = trimsuffix(replace(aws_lambda_function_url.main.function_url, "https://", ""), "/")
   cf_origin_id    = "lambda"
+  public_base_url = coalesce(var.public_base_url, trimsuffix(var.redirect_url, "/auth/callback"))
 }
 
 resource "aws_cloudfront_distribution" "main" {
@@ -28,13 +29,9 @@ resource "aws_cloudfront_distribution" "main" {
     allowed_methods        = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
     cached_methods         = ["GET", "HEAD"]
 
-    cache_policy_id          = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" # CachingDisabled
-    origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac" # AllViewerExceptHostHeader
-
-    function_association {
-      event_type   = "viewer-response"
-      function_arn = aws_cloudfront_function.restore_www_authenticate.arn
-    }
+    cache_policy_id            = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" # CachingDisabled
+    origin_request_policy_id   = "b689b0a8-53d0-40ab-baf2-68738e2966ac" # AllViewerExceptHostHeader
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.www_authenticate.id
   }
 
   viewer_certificate {

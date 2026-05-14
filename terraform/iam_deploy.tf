@@ -43,9 +43,8 @@ data "aws_iam_policy_document" "deploy_policy" {
     actions = [
       "cloudfront:GetDistribution",
       "cloudfront:ListTagsForResource",
-      "cloudfront:GetFunction",
-      "cloudfront:DescribeFunction",
-      "cloudfront:ListFunctions",
+      "cloudfront:GetResponseHeadersPolicy",
+      "cloudfront:ListResponseHeadersPolicies",
     ]
     resources = ["*"]
   }
@@ -125,14 +124,11 @@ data "aws_iam_policy_document" "deploy_policy" {
 
   statement {
     actions = [
-      "cloudfront:CreateFunction",
-      "cloudfront:UpdateFunction",
-      "cloudfront:DeleteFunction",
-      "cloudfront:PublishFunction",
-      "cloudfront:TagResource",
-      "cloudfront:UntagResource",
+      "cloudfront:CreateResponseHeadersPolicy",
+      "cloudfront:UpdateResponseHeadersPolicy",
+      "cloudfront:DeleteResponseHeadersPolicy",
     ]
-    resources = ["arn:aws:cloudfront::${data.aws_caller_identity.current.account_id}:function/notoriousmcp-*"]
+    resources = ["arn:aws:cloudfront::${data.aws_caller_identity.current.account_id}:response-headers-policy/*"]
   }
 
   statement {
