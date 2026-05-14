@@ -55,6 +55,7 @@ func Middleware(cfg Config, dbClient *db.Client, next http.Handler) http.Handler
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := bearerToken(r)
 		if token == "" {
+			setWWWAuthenticate(w, r, cfg)
 			http.Error(w, "missing authorization token", http.StatusUnauthorized)
 			return
 		}
@@ -63,6 +64,7 @@ func Middleware(cfg Config, dbClient *db.Client, next http.Handler) http.Handler
 
 		userID, newToken, err := resolveToken(ctx, cfg, dbClient, token)
 		if err != nil {
+			setWWWAuthenticate(w, r, cfg)
 			http.Error(w, "invalid or expired token", http.StatusUnauthorized)
 			return
 		}
@@ -263,4 +265,12 @@ func validSignatureUserID(secret []byte, token string) (string, error) {
 		return "", ErrInvalidToken
 	}
 	return claims.UserID, nil
+}
+
+// setWWWAuthenticate writes the WWW-Authenticate header required by RFC 9728
+// (OAuth 2.0 Protected Resource Metadata). Claude Code's MCP SDK reads the
+// resource_metadata URL to discover the authorization server before starting OAuth.
+func setWWWAuthenticate(w http.ResponseWriter, r *http.Request, cfg Config) {
+	base := cfg.publicBase(r)
+	w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+base+`/.well-known/oauth-protected-resource"`)
 }
