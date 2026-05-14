@@ -8,6 +8,8 @@ resource "aws_cloudfront_function" "restore_www_authenticate" {
     async function handler(event) {
       const response = event.response;
       const headers = response.headers;
+      headers["x-cf-function-ran"] = { value: "yes" };
+      headers["x-cf-header-keys"] = { value: Object.keys(headers).join(",") };
       if (headers["x-amzn-remapped-www-authenticate"]) {
         headers["www-authenticate"] = { value: headers["x-amzn-remapped-www-authenticate"].value };
         delete headers["x-amzn-remapped-www-authenticate"];
