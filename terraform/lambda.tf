@@ -72,15 +72,15 @@ resource "aws_cloudwatch_log_group" "lambda" {
 # would drop unreserved below the 10-minimum and fail. The 10-total cap already
 # bounds abuse. Revisit if the account limit is raised.
 resource "aws_lambda_function" "main" {
-  function_name = "notoriousmcp-${var.environment}"
-  role          = aws_iam_role.lambda.arn
-  handler       = "bootstrap"
-  runtime       = "provided.al2023"
-  architectures = ["arm64"]
+  function_name    = "notoriousmcp-${var.environment}"
+  role             = aws_iam_role.lambda.arn
+  handler          = "bootstrap"
+  runtime          = "provided.al2023"
+  architectures    = ["arm64"]
   filename         = "${path.root}/../lambda.zip"
   source_code_hash = filebase64sha256("${path.root}/../lambda.zip")
   timeout          = 30
-  memory_size   = 256
+  memory_size      = 256
 
   environment {
     variables = {
