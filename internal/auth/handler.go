@@ -91,6 +91,7 @@ func (h *Handler) wellKnown(w http.ResponseWriter, r *http.Request) {
 	if base == "" {
 		base = requestScheme(r, h.cfg.TrustProxy) + "://" + r.Host
 	}
+	base = strings.TrimRight(base, "/")
 	meta := map[string]any{
 		"issuer":                   base,
 		"authorization_endpoint":   base + "/auth/login",

@@ -88,7 +88,7 @@ resource "aws_lambda_function" "main" {
       S3_BUCKET                = aws_s3_bucket.content.bucket
       ENVIRONMENT              = var.environment
       REDIRECT_URL             = var.redirect_url
-      PUBLIC_BASE_URL          = replace(var.redirect_url, "/auth/callback", "")
+      PUBLIC_BASE_URL          = coalesce(var.public_base_url, trimsuffix(var.redirect_url, "/auth/callback"))
       SSM_GOOGLE_CLIENT_ID     = aws_ssm_parameter.google_client_id.name
       SSM_GOOGLE_CLIENT_SECRET = aws_ssm_parameter.google_client_secret.name
       SSM_ADMIN_GOOGLE_IDS     = aws_ssm_parameter.admin_google_ids.name

@@ -27,6 +27,9 @@ admin_google_ids     = "GOOGLE_SUB_ID_1,GOOGLE_SUB_ID_2"
 token_secret         = "YOUR_RANDOM_SECRET_MIN_32_BYTES"
 redirect_url         = "https://YOUR_CLOUDFRONT_DOMAIN/auth/callback"
 
+# Optional — defaults to redirect_url with /auth/callback stripped
+# public_base_url = "https://YOUR_CLOUDFRONT_DOMAIN"
+
 # Optional — leave domain_name empty to use the CloudFront URL directly
 domain_name = "notoriousmcp.com"
 

@@ -47,6 +47,20 @@ variable "token_secret" {
 variable "redirect_url" {
   type        = string
   description = "Full OAuth callback URL registered in Google Cloud Console (e.g. https://example.com/auth/callback)"
+  validation {
+    condition     = endswith(var.redirect_url, "/auth/callback")
+    error_message = "redirect_url must end with /auth/callback."
+  }
+}
+
+variable "public_base_url" {
+  type        = string
+  default     = ""
+  description = "Public base URL of the service (e.g. https://d2eudgpkavi25i.cloudfront.net). Defaults to redirect_url with /auth/callback stripped."
+  validation {
+    condition     = var.public_base_url == "" || startswith(var.public_base_url, "https://")
+    error_message = "public_base_url must start with https:// or be left empty."
+  }
 }
 
 variable "domain_name" {
