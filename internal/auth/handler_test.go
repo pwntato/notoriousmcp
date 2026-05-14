@@ -315,8 +315,10 @@ func TestRegisterValidLoopback(t *testing.T) {
 	if resp["client_id"] == "" {
 		t.Error("client_id should be non-empty")
 	}
-	if resp["client_id_issued_at"] == nil {
-		t.Error("client_id_issued_at should be present")
+	// JSON numbers decode to float64 in map[string]any.
+	issuedAt, ok := resp["client_id_issued_at"].(float64)
+	if !ok || issuedAt <= 0 {
+		t.Errorf("client_id_issued_at: got %v (%T), want positive number", resp["client_id_issued_at"], resp["client_id_issued_at"])
 	}
 	uris, ok := resp["redirect_uris"].([]any)
 	if !ok || len(uris) != 1 || uris[0] != "http://127.0.0.1:54321/callback" {
@@ -324,6 +326,53 @@ func TestRegisterValidLoopback(t *testing.T) {
 	}
 	if resp["token_endpoint_auth_method"] != "none" {
 		t.Errorf("token_endpoint_auth_method: got %v", resp["token_endpoint_auth_method"])
+	}
+}
+
+func TestRegisterMalformedJSON(t *testing.T) {
+	h := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("POST", "/register", strings.NewReader("{not valid json"))
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want 400 for malformed JSON", w.Code)
+	}
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["error"] != "invalid_client_metadata" {
+		t.Errorf("error: got %q want invalid_client_metadata", resp["error"])
+	}
+}
+
+func TestRegisterRejectsUnsupportedAuthMethod(t *testing.T) {
+	h := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"redirect_uris":["http://127.0.0.1:54321/callback"],"token_endpoint_auth_method":"client_secret_basic"}`
+	req := httptest.NewRequest("POST", "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want 400 for unsupported auth method", w.Code)
+	}
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["error"] != "invalid_client_metadata" {
+		t.Errorf("error: got %q want invalid_client_metadata", resp["error"])
 	}
 }
 

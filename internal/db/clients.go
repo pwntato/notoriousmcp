@@ -11,7 +11,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-const clientSK = "CLIENT"
+// clientRecordSK is the sort key for registered client items. Named to avoid
+// confusion with clientPK which uses the "CLIENT#" prefix on the partition key.
+const clientRecordSK = "CLIENT"
 
 type clientRecord struct {
 	PK          string `dynamodbav:"PK"`
@@ -39,7 +41,7 @@ func (c *Client) SaveClient(ctx context.Context, clientID, redirectURI, clientNa
 	now := time.Now()
 	rec := clientRecord{
 		PK:          clientPK(clientID),
-		SK:          clientSK,
+		SK:          clientRecordSK,
 		ClientID:    clientID,
 		ClientName:  clientName,
 		RedirectURI: redirectURI,
@@ -67,7 +69,7 @@ func (c *Client) GetClient(ctx context.Context, clientID string) (*RegisteredCli
 		TableName: aws.String(c.tableName),
 		Key: map[string]types.AttributeValue{
 			"PK": &types.AttributeValueMemberS{Value: clientPK(clientID)},
-			"SK": &types.AttributeValueMemberS{Value: clientSK},
+			"SK": &types.AttributeValueMemberS{Value: clientRecordSK},
 		},
 	})
 	if err != nil {
