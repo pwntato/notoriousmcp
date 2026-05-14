@@ -11,7 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-const clientSK = "PROFILE"
+const clientSK = "CLIENT"
 
 type clientRecord struct {
 	PK          string `dynamodbav:"PK"`
