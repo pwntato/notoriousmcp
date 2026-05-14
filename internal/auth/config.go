@@ -14,6 +14,11 @@ type Config struct {
 	// running behind a trusted reverse proxy (CloudFront/ALB). Never set on
 	// direct-to-internet deployments — it allows scheme downgrade spoofing.
 	TrustProxy bool
+	// PublicBaseURL is the canonical public base URL (e.g. https://d2eudgpkavi25i.cloudfront.net).
+	// When set, used verbatim in /.well-known/oauth-authorization-server instead of
+	// deriving from r.Host (which reflects the Lambda URL behind CloudFront, not the
+	// public CloudFront domain).
+	PublicBaseURL string
 	// GoogleTokenURL overrides Google's token endpoint. Empty means use the
 	// default (google.Endpoint). Set in tests only to point at a fake server.
 	GoogleTokenURL string

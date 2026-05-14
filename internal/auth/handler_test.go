@@ -115,6 +115,41 @@ func TestWellKnownXForwardedProtoIgnoredWithoutTrustProxy(t *testing.T) {
 	}
 }
 
+func TestWellKnownPublicBaseURL(t *testing.T) {
+	// When PublicBaseURL is set (CloudFront deployment), it must be used verbatim
+	// instead of deriving from r.Host (which would be the Lambda URL domain).
+	cfg := auth.Config{
+		ClientID:      "test-client-id",
+		ClientSecret:  "test-client-secret",
+		RedirectURL:   "https://cf.example.com/auth/callback",
+		TokenSecret:   []byte("test-secret-key-at-least-32-bytes!!"),
+		TrustProxy:    true,
+		PublicBaseURL: "https://cf.example.com",
+	}
+	h := auth.New(cfg, nil)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/.well-known/oauth-authorization-server", nil)
+	req.Host = "lambda-url.us-west-2.on.aws" // simulates r.Host behind CloudFront
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	var meta map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&meta); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if meta["issuer"] != "https://cf.example.com" {
+		t.Errorf("issuer: got %v want https://cf.example.com", meta["issuer"])
+	}
+	if meta["authorization_endpoint"] != "https://cf.example.com/auth/login" {
+		t.Errorf("authorization_endpoint: got %v", meta["authorization_endpoint"])
+	}
+	if meta["registration_endpoint"] != "https://cf.example.com/register" {
+		t.Errorf("registration_endpoint: got %v", meta["registration_endpoint"])
+	}
+}
+
 func TestLoginSetsNonceCookieAndRedirects(t *testing.T) {
 	h := newTestHandler(t)
 	mux := http.NewServeMux()

@@ -72,14 +72,15 @@ resource "aws_cloudwatch_log_group" "lambda" {
 # would drop unreserved below the 10-minimum and fail. The 10-total cap already
 # bounds abuse. Revisit if the account limit is raised.
 resource "aws_lambda_function" "main" {
-  function_name = "notoriousmcp-${var.environment}"
-  role          = aws_iam_role.lambda.arn
-  handler       = "bootstrap"
-  runtime       = "provided.al2023"
-  architectures = ["arm64"]
-  filename      = "${path.root}/../lambda.zip"
-  timeout       = 30
-  memory_size   = 256
+  function_name    = "notoriousmcp-${var.environment}"
+  role             = aws_iam_role.lambda.arn
+  handler          = "bootstrap"
+  runtime          = "provided.al2023"
+  architectures    = ["arm64"]
+  filename         = "${path.root}/../lambda.zip"
+  source_code_hash = filebase64sha256("${path.root}/../lambda.zip")
+  timeout          = 30
+  memory_size      = 256
 
   environment {
     variables = {
@@ -87,6 +88,7 @@ resource "aws_lambda_function" "main" {
       S3_BUCKET                = aws_s3_bucket.content.bucket
       ENVIRONMENT              = var.environment
       REDIRECT_URL             = var.redirect_url
+      PUBLIC_BASE_URL          = coalesce(var.public_base_url, trimsuffix(var.redirect_url, "/auth/callback"))
       SSM_GOOGLE_CLIENT_ID     = aws_ssm_parameter.google_client_id.name
       SSM_GOOGLE_CLIENT_SECRET = aws_ssm_parameter.google_client_secret.name
       SSM_ADMIN_GOOGLE_IDS     = aws_ssm_parameter.admin_google_ids.name

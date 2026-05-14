@@ -87,7 +87,11 @@ func requestScheme(r *http.Request, trustProxy bool) string {
 
 // wellKnown serves the OAuth 2.0 authorization server metadata required by the MCP spec.
 func (h *Handler) wellKnown(w http.ResponseWriter, r *http.Request) {
-	base := requestScheme(r, h.cfg.TrustProxy) + "://" + r.Host
+	base := h.cfg.PublicBaseURL
+	if base == "" {
+		base = requestScheme(r, h.cfg.TrustProxy) + "://" + r.Host
+	}
+	base = strings.TrimRight(base, "/")
 	meta := map[string]any{
 		"issuer":                   base,
 		"authorization_endpoint":   base + "/auth/login",
