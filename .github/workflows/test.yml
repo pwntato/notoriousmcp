@@ -88,7 +88,7 @@ jobs:
 
       - name: validate (main)
         run: |
-          touch lambda.zip
+          touch ../lambda.zip
           terraform init -backend=false
           terraform validate
         working-directory: terraform
