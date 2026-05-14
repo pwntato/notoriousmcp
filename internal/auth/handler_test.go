@@ -2,6 +2,8 @@ package auth_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -587,7 +589,7 @@ func TestTokenEndpointRoundTrip(t *testing.T) {
 	userID := "user-" + randUID()
 	code := "code-" + randUID()
 	redirectURI := "https://example.com/auth/callback"
-	if err := dbClient.SaveAuthCode(context.Background(), code, userID, redirectURI, 60*time.Second); err != nil {
+	if err := dbClient.SaveAuthCode(context.Background(), code, userID, redirectURI, "", "", 60*time.Second); err != nil {
 		t.Fatalf("save auth code: %v", err)
 	}
 	// Code is redeemed (deleted) by the handler on success; cleanup is a no-op in the happy path
@@ -653,7 +655,7 @@ func TestTokenEndpointSingleUse(t *testing.T) {
 	userID := "user-" + randUID()
 	code := "code-" + randUID()
 	redirectURI := "https://example.com/auth/callback"
-	if err := dbClient.SaveAuthCode(context.Background(), code, userID, redirectURI, 60*time.Second); err != nil {
+	if err := dbClient.SaveAuthCode(context.Background(), code, userID, redirectURI, "", "", 60*time.Second); err != nil {
 		t.Fatalf("save auth code: %v", err)
 	}
 	t.Cleanup(func() { _, _ = dbClient.RedeemAuthCode(context.Background(), code) })
@@ -685,7 +687,7 @@ func TestTokenEndpointRedirectURIMismatch(t *testing.T) {
 
 	userID := "user-" + randUID()
 	code := "code-" + randUID()
-	if err := dbClient.SaveAuthCode(context.Background(), code, userID, "https://example.com/auth/callback", 60*time.Second); err != nil {
+	if err := dbClient.SaveAuthCode(context.Background(), code, userID, "https://example.com/auth/callback", "", "", 60*time.Second); err != nil {
 		t.Fatalf("save auth code: %v", err)
 	}
 	t.Cleanup(func() { _, _ = dbClient.RedeemAuthCode(context.Background(), code) })
@@ -717,7 +719,7 @@ func TestTokenEndpointRedirectURIOmitted(t *testing.T) {
 
 	userID := "user-" + randUID()
 	code := "code-" + randUID()
-	if err := dbClient.SaveAuthCode(context.Background(), code, userID, "https://example.com/auth/callback", 60*time.Second); err != nil {
+	if err := dbClient.SaveAuthCode(context.Background(), code, userID, "https://example.com/auth/callback", "", "", 60*time.Second); err != nil {
 		t.Fatalf("save auth code: %v", err)
 	}
 	t.Cleanup(func() { _, _ = dbClient.RedeemAuthCode(context.Background(), code) })
@@ -737,6 +739,104 @@ func TestTokenEndpointRedirectURIOmitted(t *testing.T) {
 	}
 	if body["error"] != "invalid_grant" {
 		t.Errorf("error: got %q want invalid_grant", body["error"])
+	}
+}
+
+func s256Challenge(verifier string) string {
+	h := sha256.Sum256([]byte(verifier))
+	return base64.RawURLEncoding.EncodeToString(h[:])
+}
+
+func TestTokenEndpointPKCEValid(t *testing.T) {
+	dbClient := newTestDBClient(t)
+	h := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	userID := "user-" + randUID()
+	code := "code-" + randUID()
+	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	challenge := s256Challenge(verifier)
+
+	if err := dbClient.SaveAuthCode(context.Background(), code, userID, "https://example.com/auth/callback", challenge, "S256", 60*time.Second); err != nil {
+		t.Fatalf("save auth code: %v", err)
+	}
+	t.Cleanup(func() { _, _ = dbClient.RedeemAuthCode(context.Background(), code) })
+
+	body := strings.NewReader("grant_type=authorization_code&code=" + code + "&redirect_uri=https%3A%2F%2Fexample.com%2Fauth%2Fcallback&code_verifier=" + verifier)
+	req := httptest.NewRequest("POST", "/auth/token", body)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status: got %d want 200, body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestTokenEndpointPKCEMissingVerifier(t *testing.T) {
+	dbClient := newTestDBClient(t)
+	h := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	userID := "user-" + randUID()
+	code := "code-" + randUID()
+	challenge := s256Challenge("some-verifier")
+
+	if err := dbClient.SaveAuthCode(context.Background(), code, userID, "https://example.com/auth/callback", challenge, "S256", 60*time.Second); err != nil {
+		t.Fatalf("save auth code: %v", err)
+	}
+	t.Cleanup(func() { _, _ = dbClient.RedeemAuthCode(context.Background(), code) })
+
+	body := strings.NewReader("grant_type=authorization_code&code=" + code + "&redirect_uri=https%3A%2F%2Fexample.com%2Fauth%2Fcallback")
+	req := httptest.NewRequest("POST", "/auth/token", body)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d want 400", w.Code)
+	}
+}
+
+func TestTokenEndpointPKCEWrongVerifier(t *testing.T) {
+	dbClient := newTestDBClient(t)
+	h := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	userID := "user-" + randUID()
+	code := "code-" + randUID()
+	challenge := s256Challenge("correct-verifier")
+
+	if err := dbClient.SaveAuthCode(context.Background(), code, userID, "https://example.com/auth/callback", challenge, "S256", 60*time.Second); err != nil {
+		t.Fatalf("save auth code: %v", err)
+	}
+	t.Cleanup(func() { _, _ = dbClient.RedeemAuthCode(context.Background(), code) })
+
+	body := strings.NewReader("grant_type=authorization_code&code=" + code + "&redirect_uri=https%3A%2F%2Fexample.com%2Fauth%2Fcallback&code_verifier=wrong-verifier")
+	req := httptest.NewRequest("POST", "/auth/token", body)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d want 400", w.Code)
+	}
+}
+
+func TestLoginRejectsUnknownCodeChallengeMethod(t *testing.T) {
+	h := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/auth/login?code_challenge=abc&code_challenge_method=plain", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d want 400", w.Code)
 	}
 }
 

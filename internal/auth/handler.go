@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -90,12 +91,13 @@ func requestScheme(r *http.Request, trustProxy bool) string {
 func (h *Handler) wellKnown(w http.ResponseWriter, r *http.Request) {
 	base := h.cfg.publicBase(r)
 	meta := map[string]any{
-		"issuer":                   base,
-		"authorization_endpoint":   base + "/auth/login",
-		"token_endpoint":           base + "/auth/token",
-		"registration_endpoint":    base + "/register",
-		"response_types_supported": []string{"code"},
-		"grant_types_supported":    []string{"authorization_code"},
+		"issuer":                            base,
+		"authorization_endpoint":            base + "/auth/login",
+		"token_endpoint":                    base + "/auth/token",
+		"registration_endpoint":             base + "/register",
+		"response_types_supported":          []string{"code"},
+		"grant_types_supported":             []string{"authorization_code"},
+		"code_challenge_methods_supported":   []string{"S256"},
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(meta)
@@ -119,6 +121,7 @@ type oauthStatePayload struct {
 	Nonce             string `json:"n"`
 	ClientRedirectURI string `json:"r"`
 	ClientState       string `json:"s"`
+	CodeChallenge     string `json:"cc,omitempty"`
 }
 
 // login initiates the OAuth flow by redirecting to Google.
@@ -156,6 +159,15 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// PKCE (RFC 7636): if code_challenge is present, method must be S256.
+	codeChallenge := r.URL.Query().Get("code_challenge")
+	if codeChallenge != "" {
+		if r.URL.Query().Get("code_challenge_method") != "S256" {
+			http.Error(w, "unsupported code_challenge_method", http.StatusBadRequest)
+			return
+		}
+	}
+
 	nonce, err := generateRandomCode()
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -167,6 +179,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		Nonce:             nonce,
 		ClientRedirectURI: clientRedirectURI,
 		ClientState:       r.URL.Query().Get("state"),
+		CodeChallenge:     codeChallenge,
 	}
 	stateJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -180,8 +193,6 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	// Note: oauthStatePayload (redirect_uri + client state) is base64-encoded, not
 	// encrypted — it is visible to the browser. It contains no secrets; the nonce is
 	// the only security-critical value and it is validated separately via this cookie.
-	// PKCE (RFC 7636) is not enforced here. If public/native MCP clients are supported
-	// in future, add PKCE via oauth2.S256ChallengeOption before deploying to them.
 	secure := requestScheme(r, h.cfg.TrustProxy) == "https"
 	http.SetCookie(w, &http.Cookie{
 		Name:     "oauth_nonce",
@@ -305,7 +316,11 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
-		if saveErr := h.db.SaveAuthCode(ctx, code, info.Sub, clientRedirectURI, authCodeTTL); saveErr == nil {
+		codeChallengeMethod := ""
+		if payload.CodeChallenge != "" {
+			codeChallengeMethod = "S256"
+		}
+		if saveErr := h.db.SaveAuthCode(ctx, code, info.Sub, clientRedirectURI, payload.CodeChallenge, codeChallengeMethod, authCodeTTL); saveErr == nil {
 			exchangeCode = code
 			break
 		} else if !errors.Is(saveErr, db.ErrAuthCodeCollision) {
@@ -515,6 +530,20 @@ func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// RFC 7636: if the auth code was bound to a PKCE challenge, the verifier
+	// must be present and must produce the stored challenge when hashed.
+	if redeemed.CodeChallenge != "" {
+		verifier := r.FormValue("code_verifier")
+		if verifier == "" {
+			writeJSONError(w, http.StatusBadRequest, "invalid_grant")
+			return
+		}
+		if !verifyS256(verifier, redeemed.CodeChallenge) {
+			writeJSONError(w, http.StatusBadRequest, "invalid_grant")
+			return
+		}
+	}
+
 	accessToken, err := IssueAccessToken(h.cfg.TokenSecret, redeemed.UserID)
 	if err != nil {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -621,4 +650,12 @@ func (h *Handler) upsertUser(ctx context.Context, info *googleUserInfo, refreshT
 	}
 
 	return nil
+}
+
+// verifyS256 checks that SHA-256(verifier), base64url-encoded without padding,
+// equals the stored challenge — the RFC 7636 S256 method.
+func verifyS256(verifier, challenge string) bool {
+	h := sha256.Sum256([]byte(verifier))
+	computed := base64.RawURLEncoding.EncodeToString(h[:])
+	return computed == challenge
 }

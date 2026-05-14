@@ -17,7 +17,7 @@ func TestAuthCodeRoundTrip(t *testing.T) {
 	userID := "user-" + uid()
 
 	redirectURI := "https://example.com/callback"
-	if err := c.SaveAuthCode(ctx, code, userID, redirectURI, 60*time.Second); err != nil {
+	if err := c.SaveAuthCode(ctx, code, userID, redirectURI, "", "", 60*time.Second); err != nil {
 		t.Fatalf("save auth code: %v", err)
 	}
 
@@ -40,7 +40,7 @@ func TestAuthCodeSingleUse(t *testing.T) {
 	code := "testcode-" + uid()
 	userID := "user-" + uid()
 
-	if err := c.SaveAuthCode(ctx, code, userID, "", 60*time.Second); err != nil {
+	if err := c.SaveAuthCode(ctx, code, userID, "", "", "", 60*time.Second); err != nil {
 		t.Fatalf("save auth code: %v", err)
 	}
 	if _, err := c.RedeemAuthCode(ctx, code); err != nil {
@@ -70,10 +70,10 @@ func TestAuthCodeCollision(t *testing.T) {
 	code := "testcode-" + uid()
 	userID := "user-" + uid()
 
-	if err := c.SaveAuthCode(ctx, code, userID, "", 60*time.Second); err != nil {
+	if err := c.SaveAuthCode(ctx, code, userID, "", "", "", 60*time.Second); err != nil {
 		t.Fatalf("first save: %v", err)
 	}
-	err := c.SaveAuthCode(ctx, code, userID, "", 60*time.Second)
+	err := c.SaveAuthCode(ctx, code, userID, "", "", "", 60*time.Second)
 	if !errors.Is(err, db.ErrAuthCodeCollision) {
 		t.Errorf("duplicate save: got %v want ErrAuthCodeCollision", err)
 	}
@@ -87,7 +87,7 @@ func TestAuthCodeExpired(t *testing.T) {
 	userID := "user-" + uid()
 
 	// Save with a TTL already in the past.
-	if err := c.SaveAuthCode(ctx, code, userID, "", -1*time.Second); err != nil {
+	if err := c.SaveAuthCode(ctx, code, userID, "", "", "", -1*time.Second); err != nil {
 		t.Fatalf("save expired auth code: %v", err)
 	}
 
