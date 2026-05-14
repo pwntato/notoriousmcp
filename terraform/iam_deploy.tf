@@ -43,6 +43,8 @@ data "aws_iam_policy_document" "deploy_policy" {
     actions = [
       "cloudfront:GetDistribution",
       "cloudfront:ListTagsForResource",
+      "cloudfront:GetResponseHeadersPolicy",
+      "cloudfront:ListResponseHeadersPolicies",
     ]
     resources = ["*"]
   }
@@ -118,6 +120,15 @@ data "aws_iam_policy_document" "deploy_policy" {
       "cloudfront:UpdateDistribution",
     ]
     resources = [aws_cloudfront_distribution.main.arn]
+  }
+
+  statement {
+    actions = [
+      "cloudfront:CreateResponseHeadersPolicy",
+      "cloudfront:UpdateResponseHeadersPolicy",
+      "cloudfront:DeleteResponseHeadersPolicy",
+    ]
+    resources = ["arn:aws:cloudfront::${data.aws_caller_identity.current.account_id}:response-headers-policy/*"]
   }
 
   statement {
