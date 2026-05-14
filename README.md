@@ -318,7 +318,7 @@ Then open `/mcp` in Claude Code, select **notoriousmcp → Authenticate**, and c
 
 ### Other MCP clients
 
-Any MCP client that supports RFC 7591 dynamic client registration and OAuth 2.0 authorization code flow can connect. Point it at:
+Any MCP client that supports RFC 7591 dynamic client registration, PKCE (RFC 7636, S256 only), and OAuth 2.0 authorization code flow can connect. Point it at:
 
 - **MCP endpoint:** `https://<your-cloudfront-domain>/mcp`
 - **Auth server discovery:** `https://<your-cloudfront-domain>/.well-known/oauth-authorization-server`
