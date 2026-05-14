@@ -6,7 +6,7 @@ resource "aws_cloudfront_response_headers_policy" "www_authenticate" {
     items {
       header   = "WWW-Authenticate"
       value    = "Bearer resource_metadata=\"${local.public_base_url}/.well-known/oauth-protected-resource\""
-      override = false
+      override = true
     }
   }
 }
