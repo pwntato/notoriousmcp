@@ -71,6 +71,45 @@ func TestMiddlewareInvalidToken(t *testing.T) {
 	}
 }
 
+func TestMiddlewareWWWAuthenticateOnMissingToken(t *testing.T) {
+	cfg := testMiddlewareCfg()
+	cfg.PublicBaseURL = "https://example.com"
+	h := auth.Middleware(cfg, nil, http.HandlerFunc(okHandler))
+
+	req := httptest.NewRequest("GET", "/", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status: got %d want 401", w.Code)
+	}
+	got := w.Header().Get("WWW-Authenticate")
+	want := `Bearer resource_metadata="https://example.com/.well-known/oauth-protected-resource"`
+	if got != want {
+		t.Errorf("WWW-Authenticate: got %q want %q", got, want)
+	}
+}
+
+func TestMiddlewareWWWAuthenticateOnBadToken(t *testing.T) {
+	cfg := testMiddlewareCfg()
+	cfg.PublicBaseURL = "https://example.com"
+	h := auth.Middleware(cfg, nil, http.HandlerFunc(okHandler))
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Authorization", "Bearer garbage")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status: got %d want 401", w.Code)
+	}
+	got := w.Header().Get("WWW-Authenticate")
+	want := `Bearer resource_metadata="https://example.com/.well-known/oauth-protected-resource"`
+	if got != want {
+		t.Errorf("WWW-Authenticate: got %q want %q", got, want)
+	}
+}
+
 func TestMiddlewareTamperedToken(t *testing.T) {
 	token, err := auth.IssueAccessToken(testSecret, "user-1")
 	if err != nil {

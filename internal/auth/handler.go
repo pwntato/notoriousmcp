@@ -64,6 +64,7 @@ func New(cfg Config, dbClient *db.Client) *Handler {
 // RegisterRoutes wires the auth endpoints onto the given mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", h.wellKnown)
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource", h.protectedResource)
 	mux.HandleFunc("GET /auth/login", h.login)
 	mux.HandleFunc("GET /auth/callback", h.callback)
 	mux.HandleFunc("POST /auth/token", h.token)
@@ -99,6 +100,23 @@ func (h *Handler) wellKnown(w http.ResponseWriter, r *http.Request) {
 		"registration_endpoint":    base + "/register",
 		"response_types_supported": []string{"code"},
 		"grant_types_supported":    []string{"authorization_code"},
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(meta)
+}
+
+// protectedResource serves the OAuth 2.0 Protected Resource Metadata (RFC 9728).
+// Claude Code's MCP SDK reads this document (linked from the WWW-Authenticate header
+// on 401 responses) to discover the authorization server before starting OAuth.
+func (h *Handler) protectedResource(w http.ResponseWriter, r *http.Request) {
+	base := h.cfg.PublicBaseURL
+	if base == "" {
+		base = requestScheme(r, h.cfg.TrustProxy) + "://" + r.Host
+	}
+	base = strings.TrimRight(base, "/")
+	meta := map[string]any{
+		"resource":               base,
+		"authorization_servers": []string{base},
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(meta)
