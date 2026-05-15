@@ -216,16 +216,18 @@ terraform apply \
   -var="google_client_id=<CLIENT_ID>" \
   -var="google_client_secret=<CLIENT_SECRET>" \
   -var="admin_google_ids=<YOUR_GOOGLE_SUB>" \
-  -var="redirect_url=https://PLACEHOLDER.execute-api.<region>.amazonaws.com/auth/callback"
+  -var="redirect_url=https://<api-gateway-domain>/auth/callback"
   # TF_VAR_token_secret is picked up from the env var set above
 ```
 
 After apply, note the outputs:
 
 ```bash
-terraform output api_gateway_url  # e.g. https://abc123.execute-api.<region>.amazonaws.com/ (note trailing slash — omit when constructing paths)
+terraform output api_gateway_url  # e.g. https://abc123.execute-api.us-west-2.amazonaws.com/
 terraform output deploy_role_arn  # e.g. arn:aws:iam::123456789012:role/notoriousmcp-deploy-prod
 ```
+
+> **Note:** `api_gateway_url` includes a trailing slash. Omit it when constructing paths like `/auth/callback` or `/mcp`.
 
 Then:
 1. Update your Google OAuth redirect URI in Google Cloud Console to `https://<api-gateway-domain>/auth/callback`
