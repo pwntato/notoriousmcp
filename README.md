@@ -33,10 +33,10 @@ A self-hosted MCP (Model Context Protocol) server for notes, todo lists, files, 
 MCP Client
     │  Authorization: Bearer <token>
     ▼
-CloudFront  (HTTPS termination; no OAC — app handles its own auth)
+API Gateway HTTP API  (HTTPS termination, throttling, access logging)
     │
     ▼
-Lambda Function URL  (AuthType: NONE, invoke mode: BUFFERED)
+Lambda Function  (arm64, 256MB, 30s timeout)
     │
     ├── DynamoDB  (single table — users, notes, todos, files, auth codes)
     ├── S3        (note and file content; metadata lives in DynamoDB)
@@ -68,9 +68,9 @@ For a personal or small-team deployment with light usage (a few hundred MCP call
 | Lambda | Invocations + duration (256MB arm64, ~100ms/call) | < $0.01 |
 | DynamoDB | On-demand reads/writes at low volume | < $0.01 |
 | S3 | Storage + requests for note/file content | < $0.10 |
-| CloudFront | Data transfer + HTTPS requests | ~$0.10 |
+| API Gateway | HTTP API requests ($1.00/million) | < $0.01 |
 | SSM Parameter Store | 4 SecureString parameters | ~$0.20 |
-| CloudWatch Logs | Lambda log ingestion (14-day retention) | ~$0.10 |
+| CloudWatch Logs | Lambda + API Gateway log ingestion (14-day retention) | ~$0.10 |
 
 SSM SecureString is the dominant cost — $0.05/parameter/month × 4 parameters = $0.20, plus $0.05 per 10,000 API calls (fetched at each cold start). At typical Lambda cold start rates the call cost is negligible.
 
@@ -80,7 +80,7 @@ All other services are effectively free at personal-use scale. The AWS Free Tier
 
 ## Prerequisites
 
-- AWS account with permissions to create Lambda, DynamoDB, S3, CloudFront, SSM, IAM, and (optionally) Route53 resources
+- AWS account with permissions to create Lambda, DynamoDB, S3, API Gateway, SSM, IAM, and (optionally) Route53 resources
 - Terraform ≥ 1.0
 - Go ≥ 1.26 (see `go.mod`; this is a release candidate toolchain — download from [go.dev/dl](https://go.dev/dl); for local builds only, CI builds in GitHub Actions)
 - GitHub repository (for OIDC-based CI/CD)
@@ -90,13 +90,13 @@ All other services are effectively free at personal-use scale. The AWS Free Tier
 
 ## Step 1 — Google OAuth Credentials
 
-You need an OAuth 2.0 Web Application client in Google Cloud Console. You will need the **CloudFront URL** for the redirect URI, but you don't have that yet — you can create the credentials now with a placeholder and update the redirect URI after deploy.
+You need an OAuth 2.0 Web Application client in Google Cloud Console. You will need the **API Gateway URL** for the redirect URI, but you don't have that yet — you can create the credentials now with a placeholder and update the redirect URI after deploy.
 
 1. Go to [Google Cloud Console → APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials)
 2. Click **Create Credentials → OAuth 2.0 Client IDs**
 3. Set application type to **Web application**
 4. Under **Authorized redirect URIs**, add:
-   - `https://<your-cloudfront-domain>/auth/callback` (update this after Step 5 if you don't know it yet)
+   - `https://<your-api-gateway-domain>/auth/callback` (update this after Step 5 if you don't know it yet)
    - `http://localhost:3000/auth/callback` (for local development)
 5. Save. Note your **Client ID** and **Client Secret** — you'll need them in Step 4.
 
@@ -155,15 +155,15 @@ The `sub` value looks like `123456789012345678901`. You'll set this as `ADMIN_GO
 
 In your GitHub repository, go to **Settings → Secrets and variables → Actions** and add:
 
-| Secret | Value | Where it comes from |
-|--------|-------|---------------------|
-| `AWS_DEPLOY_ROLE_ARN` | IAM role ARN | `terraform output deploy_role_arn` after first deploy\* |
-| `TF_STATE_BUCKET` | S3 bucket name | Step 2 output (`state_bucket`) |
-| `GOOGLE_CLIENT_ID` | OAuth client ID | Step 1 |
-| `GOOGLE_CLIENT_SECRET` | OAuth client secret | Step 1 |
-| `ADMIN_GOOGLE_IDS` | Comma-separated Google subject IDs | Step 3 |
-| `TOKEN_SECRET` | Random string ≥ 32 bytes | `openssl rand -base64 32` |
-| `REDIRECT_URL` | Full OAuth callback URL | `https://<cloudfront-domain>/auth/callback` (uppercase for GitHub Secrets; Terraform uses the lowercase `redirect_url` var name) |
+| Name | Type | Value | Where it comes from |
+|------|------|-------|---------------------|
+| `AWS_DEPLOY_ROLE_ARN` | Secret | IAM role ARN | `terraform output deploy_role_arn` after first deploy\* |
+| `GOOGLE_CLIENT_ID` | Secret | OAuth client ID | Step 1 |
+| `GOOGLE_CLIENT_SECRET` | Secret | OAuth client secret | Step 1 |
+| `ADMIN_GOOGLE_IDS` | Secret | Comma-separated Google subject IDs | Step 3 |
+| `TOKEN_SECRET` | Secret | Random string ≥ 32 bytes | `openssl rand -base64 32` |
+| `TF_STATE_BUCKET` | Variable | S3 bucket name | Step 2 output (`state_bucket`) |
+| `REDIRECT_URL` | Variable | Full OAuth callback URL | `https://<api-gateway-domain>/auth/callback` (set after Step 5) |
 
 \* `AWS_DEPLOY_ROLE_ARN` is a chicken-and-egg: the IAM role is created by Terraform, but Terraform needs the role to run in CI. **First deploy:** run Terraform locally (see Step 5), then add the role ARN as a secret so subsequent deploys run via CI.
 
@@ -188,13 +188,7 @@ Generate a `TOKEN_SECRET` first and save it — you'll need to reuse the same va
 
 ```bash
 export TF_VAR_token_secret=$(openssl rand -base64 32)
-echo "$TF_VAR_token_secret"   # save this; add as TOKEN_SECRET GitHub secret (without the TF_VAR_token_secret= prefix)
-```
-
-Set your AWS region if it's not already in your environment:
-
-```bash
-export AWS_DEFAULT_REGION=us-east-1
+echo "$TF_VAR_token_secret"   # save this; add as TOKEN_SECRET GitHub secret
 ```
 
 Initialize the backend:
@@ -215,37 +209,37 @@ terraform import aws_iam_openid_connect_provider.github \
   arn:aws:iam::<YOUR_AWS_ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com
 ```
 
-> **Note:** The `redirect_url` below uses a placeholder because you don't have the CloudFront URL yet. You'll re-apply with the real URL after the first deploy.
+> **Note:** The `redirect_url` below uses a placeholder because you don't have the API Gateway URL yet. You'll re-apply with the real URL after the first deploy.
 
 ```bash
 terraform apply \
   -var="google_client_id=<CLIENT_ID>" \
   -var="google_client_secret=<CLIENT_SECRET>" \
   -var="admin_google_ids=<YOUR_GOOGLE_SUB>" \
-  -var="redirect_url=https://PLACEHOLDER.cloudfront.net/auth/callback"
+  -var="redirect_url=https://PLACEHOLDER.execute-api.us-west-2.amazonaws.com/auth/callback"
   # TF_VAR_token_secret is picked up from the env var set above
 ```
 
 After apply, note the outputs:
 
 ```bash
-terraform output cloudfront_url   # e.g. https://d1234abcd.cloudfront.net
-terraform output deploy_role_arn  # e.g. arn:aws:iam::123456789012:role/notoriousmcp-deploy
+terraform output api_gateway_url  # e.g. https://abc123.execute-api.us-west-2.amazonaws.com/
+terraform output deploy_role_arn  # e.g. arn:aws:iam::123456789012:role/notoriousmcp-deploy-prod
 ```
 
 Then:
-1. Update your Google OAuth redirect URI in Google Cloud Console to use the real CloudFront URL
+1. Update your Google OAuth redirect URI in Google Cloud Console to `https://<api-gateway-domain>/auth/callback`
 2. Re-apply with the real `redirect_url` (reuse the same `TF_VAR_token_secret`):
    ```bash
    terraform apply \
      -var="google_client_id=<CLIENT_ID>" \
      -var="google_client_secret=<CLIENT_SECRET>" \
      -var="admin_google_ids=<YOUR_GOOGLE_SUB>" \
-     -var="redirect_url=https://<your-cloudfront-domain>/auth/callback"
+     -var="redirect_url=https://<api-gateway-domain>/auth/callback"
      # TF_VAR_token_secret is picked up from the env var set above
    ```
 3. Add `deploy_role_arn` as the `AWS_DEPLOY_ROLE_ARN` GitHub secret (Step 4)
-4. Add `REDIRECT_URL` and `TOKEN_SECRET` GitHub secrets with the real values
+4. Set the `REDIRECT_URL` GitHub variable and `TOKEN_SECRET` GitHub secret with the real values
 
 ### Subsequent deploys (CI/CD)
 
@@ -267,7 +261,7 @@ After that, CI can apply the rest of the PR normally.
 
 ### Optional: Custom Domain
 
-To use a custom domain instead of the CloudFront URL, add domain variables to your `terraform apply`. All `domain_contact_*` fields are required when `domain_name` is set:
+To use a custom domain instead of the API Gateway URL, add domain variables to your `terraform apply`. All `domain_contact_*` fields are required when `domain_name` is set:
 
 ```bash
 terraform apply \
@@ -288,13 +282,13 @@ terraform apply \
   # TF_VAR_token_secret is picked up from the env var set above
 ```
 
-This registers the domain via Route53 and wires ACM + CloudFront automatically. Update your `REDIRECT_URL` GitHub secret and Google OAuth redirect URI to use the custom domain.
+This registers the domain via Route53 and wires ACM + API Gateway automatically. Update your `REDIRECT_URL` GitHub variable and Google OAuth redirect URI to use the custom domain.
 
 ---
 
 ## Step 6 — Approve Your Account
 
-After deploy, visit `https://<your-cloudfront-domain>/auth/login` and sign in with Google. Your account is created as **pending**.
+After deploy, visit `https://<your-api-gateway-domain>/auth/login` and sign in with Google. Your account is created as **pending**.
 
 If your Google subject ID was in `ADMIN_GOOGLE_IDS`, you're automatically set to **admin** on login — no approval needed. Skip to Step 7.
 
@@ -325,7 +319,7 @@ update_user(user_id="<google-sub>", status="user")
 Run once to register the server:
 
 ```bash
-claude mcp add --transport http --scope user --callback-port 54321 notoriousmcp https://<your-cloudfront-domain>/mcp
+claude mcp add --transport http --scope user --callback-port 54321 notoriousmcp https://<your-api-gateway-domain>/mcp
 ```
 
 Then open `/mcp` in Claude Code, select **notoriousmcp → Authenticate**, and complete the Google OAuth flow in the browser that opens. Claude Code handles registration, token exchange, and auto-refresh automatically.
@@ -334,19 +328,19 @@ Then open `/mcp` in Claude Code, select **notoriousmcp → Authenticate**, and c
 
 Any MCP client that supports RFC 7591 dynamic client registration, PKCE (RFC 7636, S256 only), and OAuth 2.0 authorization code flow can connect. Point it at:
 
-- **MCP endpoint:** `https://<your-cloudfront-domain>/mcp`
-- **Auth server discovery:** `https://<your-cloudfront-domain>/.well-known/oauth-authorization-server`
-- **Client registration:** `POST https://<your-cloudfront-domain>/register`
+- **MCP endpoint:** `https://<your-api-gateway-domain>/mcp`
+- **Auth server discovery:** `https://<your-api-gateway-domain>/.well-known/oauth-authorization-server`
+- **Client registration:** `POST https://<your-api-gateway-domain>/register`
 
 ### Manual token (scripting/testing)
 
-1. Visit `https://<your-cloudfront-domain>/auth/login` in a browser
+1. Visit `https://<your-api-gateway-domain>/auth/login` in a browser
 2. Complete the Google OAuth flow — you'll land on your redirect URI with `?code=<exchange-code>` in the URL
 3. POST the exchange code:
    ```bash
-   curl -X POST https://<your-cloudfront-domain>/auth/token \
+   curl -X POST https://<your-api-gateway-domain>/auth/token \
      -H "Content-Type: application/json" \
-     -d '{"code": "<exchange-code>", "redirect_uri": "https://<your-cloudfront-domain>/auth/callback"}'
+     -d '{"code": "<exchange-code>", "redirect_uri": "https://<your-api-gateway-domain>/auth/callback"}'
    ```
 4. Use the returned token as a static Bearer header in your client config
 
