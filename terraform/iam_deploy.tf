@@ -164,6 +164,7 @@ data "aws_iam_policy_document" "deploy_policy" {
       "lambda:UpdateFunctionConfiguration",
       "lambda:AddPermission",
       "lambda:RemovePermission",
+      "lambda:DeleteFunctionUrlConfig",
       "lambda:TagResource",
     ]
     resources = [aws_lambda_function.main.arn]
