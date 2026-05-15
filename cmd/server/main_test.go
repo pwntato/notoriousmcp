@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -106,6 +105,3 @@ func TestLambdaHandler_NoCookies(t *testing.T) {
 		t.Errorf("expected no cookies, got %v", resp.Cookies)
 	}
 }
-
-// Compile-time check that httptest.NewRecorder is still imported (used by main).
-var _ = httptest.NewRecorder
