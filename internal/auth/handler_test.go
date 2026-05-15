@@ -66,6 +66,37 @@ func TestWellKnown(t *testing.T) {
 	}
 }
 
+func TestProtectedResource(t *testing.T) {
+	h := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/.well-known/oauth-protected-resource", nil)
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type: got %q want application/json", ct)
+	}
+
+	var meta map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&meta); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// resource must exactly match the MCP endpoint URL (Claude Code validates this).
+	if meta["resource"] != "http://example.com/mcp" {
+		t.Errorf("resource: got %v want http://example.com/mcp", meta["resource"])
+	}
+	as, _ := meta["authorization_servers"].([]any)
+	if len(as) != 1 || as[0] != "http://example.com" {
+		t.Errorf("authorization_servers: got %v want [http://example.com]", meta["authorization_servers"])
+	}
+}
+
 func TestWellKnownXForwardedProto(t *testing.T) {
 	h := newTestHandler(t)
 	mux := http.NewServeMux()
