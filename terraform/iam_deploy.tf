@@ -117,7 +117,10 @@ data "aws_iam_policy_document" "deploy_policy" {
       "apigateway:PATCH",
       "apigateway:DELETE",
     ]
-    resources = ["arn:aws:apigateway:${var.aws_region}::*"]
+    resources = [
+      aws_apigatewayv2_api.main.arn,
+      "${aws_apigatewayv2_api.main.execution_arn}/*",
+    ]
   }
 
   statement {
