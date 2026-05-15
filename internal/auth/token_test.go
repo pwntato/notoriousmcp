@@ -95,14 +95,16 @@ func TestValidateRedirectURI(t *testing.T) {
 		// Query string on client URI — rejected (RFC 6749 requires exact match, no query).
 		{"query string", "https://notoriousmcp.com/auth/callback?foo=bar", true},
 
-		// Loopback form (RFC 8252 §7.3) — any port, must be http://127.0.0.1.
+		// Loopback form (RFC 8252 §7.3) — any port and path, must be http://127.0.0.1.
 		{"loopback port 54321", "http://127.0.0.1:54321/callback", false},
 		{"loopback port 8080", "http://127.0.0.1:8080/callback", false},
 		{"loopback port 1", "http://127.0.0.1:1/callback", false},
+		// Claude Code uses /oauth/code/callback — allowed.
+		{"loopback claude code path", "http://127.0.0.1:54321/oauth/code/callback", false},
+		// Any path is allowed for loopback clients (RFC 8252 §7.3).
+		{"loopback any path", "http://127.0.0.1:54321/other", false},
 		// Loopback without explicit port — rejected.
 		{"loopback no port", "http://127.0.0.1/callback", true},
-		// Wrong path on loopback — rejected.
-		{"loopback wrong path", "http://127.0.0.1:54321/other", true},
 		// Non-127.0.0.1 loopback addresses — rejected (not in Google's allowlist).
 		{"loopback ipv6", "http://[::1]:54321/callback", true},
 		{"localhost hostname", "http://localhost:54321/callback", true},
