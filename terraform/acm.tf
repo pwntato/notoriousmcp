@@ -1,9 +1,8 @@
 # Only provisioned when domain_name is set
-# CloudFront requires ACM certs in us-east-1
+# API Gateway uses regional ACM certs in the same region as the API
 
 resource "aws_acm_certificate" "main" {
   count             = var.domain_name != "" ? 1 : 0
-  provider          = aws.us_east_1
   domain_name       = var.domain_name
   validation_method = "DNS"
 
@@ -30,7 +29,6 @@ resource "aws_route53_record" "cert_validation" {
 
 resource "aws_acm_certificate_validation" "main" {
   count                   = var.domain_name != "" ? 1 : 0
-  provider                = aws.us_east_1
   certificate_arn         = aws_acm_certificate.main[0].arn
   validation_record_fqdns = [for record in aws_route53_record.cert_validation : record.fqdn]
 }
