@@ -173,6 +173,21 @@ data "aws_iam_policy_document" "deploy_policy" {
   }
 
   statement {
+    # Required by API Gateway to enable access logging on a stage.
+    # These actions do not support resource-level restrictions.
+    actions = [
+      "logs:CreateLogDelivery",
+      "logs:UpdateLogDelivery",
+      "logs:DeleteLogDelivery",
+      "logs:GetLogDelivery",
+      "logs:ListLogDeliveries",
+      "logs:PutResourcePolicy",
+      "logs:DescribeResourcePolicies",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
     actions = [
       "logs:CreateLogGroup",
       "logs:PutRetentionPolicy",
