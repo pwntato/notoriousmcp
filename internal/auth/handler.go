@@ -109,7 +109,7 @@ func (h *Handler) wellKnown(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) protectedResource(w http.ResponseWriter, r *http.Request) {
 	base := h.cfg.publicBase(r)
 	meta := map[string]any{
-		"resource":               base,
+		"resource":               base + "/mcp",
 		"authorization_servers": []string{base},
 	}
 	w.Header().Set("Content-Type", "application/json")
