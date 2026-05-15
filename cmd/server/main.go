@@ -27,7 +27,9 @@ import (
 
 var handler http.Handler
 
-func init() {
+// initHandler builds the global handler from environment + SSM. Invoked from main
+// so tests can swap the handler without triggering AWS config loading.
+func initHandler() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -86,11 +88,11 @@ func init() {
 	handler = publicRouter(mux, protected)
 }
 
-func lambdaHandler(ctx context.Context, req events.LambdaFunctionURLRequest) (events.LambdaFunctionURLResponse, error) {
+func lambdaHandler(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
 	httpReq, err := toHTTPRequest(ctx, req)
 	if err != nil {
 		log.Printf("toHTTPRequest: %v", err)
-		return events.LambdaFunctionURLResponse{
+		return events.APIGatewayV2HTTPResponse{
 			StatusCode: 400,
 			Headers:    map[string]string{"Content-Type": "application/json"},
 			Body:       `{"error":"bad request"}`,
@@ -101,8 +103,14 @@ func lambdaHandler(ctx context.Context, req events.LambdaFunctionURLRequest) (ev
 	handler.ServeHTTP(rec, httpReq)
 
 	resp := rec.Result()
+	// API Gateway v2 requires Set-Cookie values in a dedicated Cookies array;
+	// collapsing them into a comma-joined Headers entry produces a single malformed cookie.
+	setCookies := resp.Header.Values("Set-Cookie")
 	headers := make(map[string]string, len(resp.Header))
 	for k, vs := range resp.Header {
+		if http.CanonicalHeaderKey(k) == "Set-Cookie" {
+			continue
+		}
 		headers[k] = strings.Join(vs, ", ")
 	}
 
@@ -114,19 +122,21 @@ func lambdaHandler(ctx context.Context, req events.LambdaFunctionURLRequest) (ev
 		isBase64 = true
 	}
 
-	return events.LambdaFunctionURLResponse{
+	return events.APIGatewayV2HTTPResponse{
 		StatusCode:      resp.StatusCode,
 		Headers:         headers,
+		Cookies:         setCookies,
 		Body:            body,
 		IsBase64Encoded: isBase64,
 	}, nil
 }
 
 func main() {
+	initHandler()
 	lambda.Start(lambdaHandler)
 }
 
-func toHTTPRequest(ctx context.Context, req events.LambdaFunctionURLRequest) (*http.Request, error) {
+func toHTTPRequest(ctx context.Context, req events.APIGatewayV2HTTPRequest) (*http.Request, error) {
 	url := "https://" + req.RequestContext.DomainName + req.RawPath
 	if req.RawQueryString != "" {
 		url += "?" + req.RawQueryString
@@ -149,6 +159,10 @@ func toHTTPRequest(ctx context.Context, req events.LambdaFunctionURLRequest) (*h
 	}
 	for k, v := range req.Headers {
 		httpReq.Header.Set(k, v)
+	}
+	// API Gateway v2 delivers cookies in a dedicated array, not in the Cookie header.
+	if len(req.Cookies) > 0 {
+		httpReq.Header.Set("Cookie", strings.Join(req.Cookies, "; "))
 	}
 	return httpReq, nil
 }
