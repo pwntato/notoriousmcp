@@ -163,7 +163,7 @@ In your GitHub repository, go to **Settings → Secrets and variables → Action
 | `ADMIN_GOOGLE_IDS` | Secret | Comma-separated Google subject IDs | Step 3 |
 | `TOKEN_SECRET` | Secret | Random string ≥ 32 bytes | `openssl rand -base64 32` |
 | `TF_STATE_BUCKET` | Variable | S3 bucket name | Step 2 output (`state_bucket`) |
-| `REDIRECT_URL` | Variable | Full OAuth callback URL | `https://<api-gateway-domain>/auth/callback` (set after Step 5) |
+| `REDIRECT_URL` | Variable | Full OAuth callback URL | `https://<api-gateway-domain>/auth/callback` (set after Step 5; Terraform uses the lowercase `redirect_url` var name) |
 
 \* `AWS_DEPLOY_ROLE_ARN` is a chicken-and-egg: the IAM role is created by Terraform, but Terraform needs the role to run in CI. **First deploy:** run Terraform locally (see Step 5), then add the role ARN as a secret so subsequent deploys run via CI.
 
@@ -216,14 +216,14 @@ terraform apply \
   -var="google_client_id=<CLIENT_ID>" \
   -var="google_client_secret=<CLIENT_SECRET>" \
   -var="admin_google_ids=<YOUR_GOOGLE_SUB>" \
-  -var="redirect_url=https://PLACEHOLDER.execute-api.us-west-2.amazonaws.com/auth/callback"
+  -var="redirect_url=https://PLACEHOLDER.execute-api.<region>.amazonaws.com/auth/callback"
   # TF_VAR_token_secret is picked up from the env var set above
 ```
 
 After apply, note the outputs:
 
 ```bash
-terraform output api_gateway_url  # e.g. https://abc123.execute-api.us-west-2.amazonaws.com/
+terraform output api_gateway_url  # e.g. https://abc123.execute-api.<region>.amazonaws.com/ (note trailing slash — omit when constructing paths)
 terraform output deploy_role_arn  # e.g. arn:aws:iam::123456789012:role/notoriousmcp-deploy-prod
 ```
 
