@@ -117,9 +117,11 @@ data "aws_iam_policy_document" "deploy_policy" {
       "apigateway:PATCH",
       "apigateway:DELETE",
     ]
+    # API GW child resources (integrations, routes, stages) have ARNs under
+    # arn:aws:apigateway:{region}::/apis/{id}/* — distinct from the API's own ARN.
     resources = [
       aws_apigatewayv2_api.main.arn,
-      "${aws_apigatewayv2_api.main.execution_arn}/*",
+      "arn:aws:apigateway:${var.aws_region}::/apis/${aws_apigatewayv2_api.main.id}/*",
     ]
   }
 
