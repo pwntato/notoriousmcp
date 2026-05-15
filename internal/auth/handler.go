@@ -351,10 +351,11 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 //  1. Exact match against the server's configured redirect URL (scheme, host,
 //     path, no query string). path.Clean neutralises traversal sequences.
 //
-//  2. http://127.0.0.1:<port>/<any-path> — the loopback redirect form used by
-//     native/CLI OAuth clients (RFC 8252 §7.3). Any port and any path is
-//     accepted. RFC 8252 §7.3 only requires the loopback IP; different MCP
-//     clients use different paths (e.g. Claude Code uses /oauth/code/callback).
+//  2. http://127.0.0.1:<port>/<any-path> or http://localhost:<port>/<any-path>
+//     — the loopback redirect form used by native/CLI OAuth clients (RFC 8252
+//     §7.3). Any port and any path is accepted. Both "127.0.0.1" and "localhost"
+//     are accepted because Claude Code's MCP SDK uses "localhost" (despite RFC
+//     8252 §8.3 recommending the IP literal).
 //
 // Query strings are rejected on the client URI because they are not part of a
 // valid callback URL and could be used to smuggle state via an open redirector.
@@ -367,8 +368,8 @@ func ValidateRedirectURI(configuredRedirectURL, clientRedirectURI string) error 
 		return fmt.Errorf("redirect_uri must not contain a query string")
 	}
 
-	// Loopback form: http://127.0.0.1:<port>/<path>
-	if client.Scheme == "http" && client.Hostname() == "127.0.0.1" {
+	// Loopback form: http://127.0.0.1:<port>/<path> or http://localhost:<port>/<path>
+	if client.Scheme == "http" && (client.Hostname() == "127.0.0.1" || client.Hostname() == "localhost") {
 		if client.Port() == "" {
 			return fmt.Errorf("redirect_uri loopback form requires an explicit port")
 		}
