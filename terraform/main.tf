@@ -17,9 +17,3 @@ terraform {
 provider "aws" {
   region = var.aws_region
 }
-
-# ACM for CloudFront must be in us-east-1 regardless of deployment region
-provider "aws" {
-  alias  = "us_east_1"
-  region = "us-east-1"
-}

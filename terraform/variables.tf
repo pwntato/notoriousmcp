@@ -56,7 +56,7 @@ variable "redirect_url" {
 variable "public_base_url" {
   type        = string
   default     = ""
-  description = "Public base URL of the service (e.g. https://d2eudgpkavi25i.cloudfront.net). Defaults to redirect_url with /auth/callback stripped."
+  description = "Public base URL of the service (e.g. https://abc123.execute-api.us-west-2.amazonaws.com). Defaults to redirect_url with /auth/callback stripped."
   validation {
     condition     = var.public_base_url == "" || startswith(var.public_base_url, "https://")
     error_message = "public_base_url must start with https:// or be left empty."
@@ -66,7 +66,7 @@ variable "public_base_url" {
 variable "domain_name" {
   type        = string
   default     = ""
-  description = "Optional custom domain (e.g. notoriousmcp.com). Leave empty to use CloudFront URL."
+  description = "Optional custom domain (e.g. notoriousmcp.com). Leave empty to use the API Gateway invoke URL."
 }
 
 variable "domain_contact_first_name" {

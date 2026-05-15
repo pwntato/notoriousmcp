@@ -41,13 +41,9 @@ data "aws_iam_policy_document" "deploy_policy" {
   # These are read-only actions scoped to this account.
   statement {
     actions = [
-      "cloudfront:GetDistribution",
-      "cloudfront:ListTagsForResource",
-      "cloudfront:GetFunction",
-      "cloudfront:DescribeFunction",
-      "cloudfront:ListFunctions",
+      "apigateway:GET",
     ]
-    resources = ["*"]
+    resources = ["arn:aws:apigateway:${var.aws_region}::*"]
   }
 
   statement {
@@ -75,7 +71,6 @@ data "aws_iam_policy_document" "deploy_policy" {
     actions = [
       "lambda:GetFunction",
       "lambda:GetFunctionCodeSigningConfig",
-      "lambda:GetFunctionUrlConfig",
       "lambda:GetPolicy",
       "lambda:ListVersionsByFunction",
     ]
@@ -117,20 +112,15 @@ data "aws_iam_policy_document" "deploy_policy" {
   # Write permissions for terraform apply
   statement {
     actions = [
-      "cloudfront:CreateInvalidation",
-      "cloudfront:UpdateDistribution",
+      "apigateway:POST",
+      "apigateway:PUT",
+      "apigateway:PATCH",
+      "apigateway:DELETE",
     ]
-    resources = [aws_cloudfront_distribution.main.arn]
-  }
-
-  statement {
-    actions = [
-      "cloudfront:CreateFunction",
-      "cloudfront:UpdateFunction",
-      "cloudfront:DeleteFunction",
-      "cloudfront:PublishFunction",
+    resources = [
+      aws_apigatewayv2_api.main.arn,
+      "${aws_apigatewayv2_api.main.execution_arn}/*",
     ]
-    resources = ["arn:aws:cloudfront::${data.aws_caller_identity.current.account_id}:function/notoriousmcp-*"]
   }
 
   statement {
@@ -174,8 +164,7 @@ data "aws_iam_policy_document" "deploy_policy" {
       "lambda:UpdateFunctionConfiguration",
       "lambda:AddPermission",
       "lambda:RemovePermission",
-      "lambda:CreateFunctionUrlConfig",
-      "lambda:UpdateFunctionUrlConfig",
+      "lambda:DeleteFunctionUrlConfig",
       "lambda:TagResource",
     ]
     resources = [aws_lambda_function.main.arn]
