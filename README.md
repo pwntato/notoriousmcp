@@ -334,6 +334,8 @@ Any MCP client that supports RFC 7591 dynamic client registration, PKCE (RFC 763
 - **Auth server discovery:** `https://<your-api-gateway-domain>/.well-known/oauth-authorization-server`
 - **Client registration:** `POST https://<your-api-gateway-domain>/register`
 
+The `/register` endpoint accepts redirect URIs in RFC 8252 §7.3 loopback form (`http://127.0.0.1:<port>/<path>` or `http://localhost:<port>/<path>` — any port, any path, no query string) or an exact match against the server's configured `REDIRECT_URL`. The `token_endpoint_auth_method` must be `"none"` (public client / PKCE only).
+
 ### Manual token (scripting/testing)
 
 1. Visit `https://<your-api-gateway-domain>/auth/login` in a browser
