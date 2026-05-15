@@ -428,6 +428,8 @@ update_user(user_id=<sub>, status="banned") → ban a user
 
 Admins in `ADMIN_GOOGLE_IDS` are forcibly set to admin on every login, so admin status for bootstrap users cannot be accidentally revoked.
 
+> **Known issue:** `list_users` currently returns `MCP error -32603` against the deployed prod stack because the Lambda IAM role is missing `dynamodb:Scan`. Tracked in [#98](https://github.com/pwntato/notoriousmcp/issues/98). Until fixed, look up pending users with the AWS CLI scan in [Step 3](#step-3--find-your-google-subject-id) and promote them via `update_user` (which uses `UpdateItem` and is unaffected).
+
 ---
 
 ## Skill File
