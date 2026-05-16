@@ -55,7 +55,7 @@ Lambda Function  (arm64, 256MB, 30s timeout)
 
 New accounts start as **pending** and can only call `check_status`. An admin must promote them to **user** or **admin**.
 
-**Admin bootstrap:** The `ADMIN_GOOGLE_IDS` SSM parameter holds a comma-separated list of Google subject IDs that are forcibly set to `admin` status on every login. This self-heals if admin status is accidentally removed.
+**Admin bootstrap:** The `ADMIN_IDS` SSM parameter holds a comma-separated list of provider subject IDs (`sub` claim) that are forcibly set to `admin` status on every login. This self-heals if admin status is accidentally removed.
 
 ---
 
@@ -84,7 +84,7 @@ All other services are effectively free at personal-use scale. The AWS Free Tier
 - Terraform ≥ 1.0
 - Go ≥ 1.26 (see `go.mod`; this is a release candidate toolchain — download from [go.dev/dl](https://go.dev/dl); for local builds only, CI builds in GitHub Actions)
 - GitHub repository (for OIDC-based CI/CD)
-- A Google account (for OAuth)
+- A Google account or Okta org (for OAuth)
 
 ---
 
@@ -147,7 +147,7 @@ aws dynamodb scan --table-name notoriousmcp \
   | jq -r '.Items[] | select(.SK.S == "PROFILE") | {id: .PK.S, email: .Email.S}'
 ```
 
-The `sub` value looks like `123456789012345678901`. You'll set this as `ADMIN_GOOGLE_IDS` in Step 4.
+The `sub` value looks like `123456789012345678901`. You'll set this as `ADMIN_IDS` in Step 4.
 
 ---
 
@@ -158,9 +158,9 @@ In your GitHub repository, go to **Settings → Secrets and variables → Action
 | Name | Type | Value | Where it comes from |
 |------|------|-------|---------------------|
 | `AWS_DEPLOY_ROLE_ARN` | Secret | IAM role ARN | `terraform output deploy_role_arn` after first deploy\* |
-| `GOOGLE_CLIENT_ID` | Secret | OAuth client ID | Step 1 |
-| `GOOGLE_CLIENT_SECRET` | Secret | OAuth client secret | Step 1 |
-| `ADMIN_GOOGLE_IDS` | Secret | Comma-separated Google subject IDs | Step 3 |
+| `OAUTH_CLIENT_ID` | Secret | OAuth client ID | Step 1 |
+| `OAUTH_CLIENT_SECRET` | Secret | OAuth client secret | Step 1 |
+| `ADMIN_IDS` | Secret | Comma-separated provider subject IDs | Step 3 |
 | `TOKEN_SECRET` | Secret | Random string ≥ 32 bytes | `openssl rand -base64 32` |
 | `TF_STATE_BUCKET` | Variable | S3 bucket name | Step 2 output (`state_bucket`) |
 | `REDIRECT_URL` | Variable | Full OAuth callback URL | `https://<api-gateway-domain>/auth/callback` (set after Step 5; Terraform uses the lowercase `redirect_url` var name) |
@@ -213,9 +213,9 @@ terraform import aws_iam_openid_connect_provider.github \
 
 ```bash
 terraform apply \
-  -var="google_client_id=<CLIENT_ID>" \
-  -var="google_client_secret=<CLIENT_SECRET>" \
-  -var="admin_google_ids=<YOUR_GOOGLE_SUB>" \
+  -var="oauth_client_id=<CLIENT_ID>" \
+  -var="oauth_client_secret=<CLIENT_SECRET>" \
+  -var="admin_ids=<YOUR_SUB>" \
   -var="redirect_url=https://<api-gateway-domain>/auth/callback"
   # TF_VAR_token_secret is picked up from the env var set above
 ```
@@ -234,9 +234,9 @@ Then:
 2. Re-apply with the real `redirect_url` (reuse the same `TF_VAR_token_secret`):
    ```bash
    terraform apply \
-     -var="google_client_id=<CLIENT_ID>" \
-     -var="google_client_secret=<CLIENT_SECRET>" \
-     -var="admin_google_ids=<YOUR_GOOGLE_SUB>" \
+     -var="oauth_client_id=<CLIENT_ID>" \
+     -var="oauth_client_secret=<CLIENT_SECRET>" \
+     -var="admin_ids=<YOUR_SUB>" \
      -var="redirect_url=https://<api-gateway-domain>/auth/callback"
      # TF_VAR_token_secret is picked up from the env var set above
    ```
@@ -267,9 +267,9 @@ To use a custom domain instead of the API Gateway URL, add domain variables to y
 
 ```bash
 terraform apply \
-  -var="google_client_id=<CLIENT_ID>" \
-  -var="google_client_secret=<CLIENT_SECRET>" \
-  -var="admin_google_ids=<YOUR_GOOGLE_SUB>" \
+  -var="oauth_client_id=<CLIENT_ID>" \
+  -var="oauth_client_secret=<CLIENT_SECRET>" \
+  -var="admin_ids=<YOUR_SUB>" \
   -var="redirect_url=https://<your-domain>/auth/callback" \
   -var="domain_name=notoriousmcp.example.com" \
   -var="domain_contact_first_name=Jane" \
@@ -292,7 +292,7 @@ This registers the domain via Route53 and wires ACM + API Gateway automatically.
 
 After deploy, visit `https://<your-api-gateway-domain>/auth/login` and sign in with Google. Your account is created as **pending**.
 
-If your Google subject ID was in `ADMIN_GOOGLE_IDS`, you're automatically set to **admin** on login — no approval needed. Skip to Step 7.
+If your subject ID was in `ADMIN_IDS`, you're automatically set to **admin** on login — no approval needed. Skip to Step 7.
 
 Otherwise, an existing admin must promote you. If you're setting up for the first time and have no admin yet, use the AWS CLI to update your user record directly:
 
@@ -374,14 +374,18 @@ docker compose up server
 Key `.env` values for local dev:
 
 ```bash
-GOOGLE_CLIENT_ID=<from Google Cloud Console>
-GOOGLE_CLIENT_SECRET=<from Google Cloud Console>
+OAUTH_CLIENT_ID=<from Google Cloud Console or Okta>
+OAUTH_CLIENT_SECRET=<from Google Cloud Console or Okta>
 REDIRECT_URL=http://localhost:3000/auth/callback
 TOKEN_SECRET=<any string ≥ 32 bytes>
-ADMIN_GOOGLE_IDS=<your Google subject ID>
+ADMIN_IDS=<your provider subject ID>
+
+# To use Okta instead of Google:
+# OAUTH_PROVIDER=okta
+# OKTA_DOMAIN=dev-123.okta.com
 ```
 
-Add `http://localhost:3000/auth/callback` as an authorized redirect URI in your Google OAuth app (Step 1).
+Add `http://localhost:3000/auth/callback` as an authorized redirect URI in your OAuth app.
 
 **Run tests:**
 
@@ -424,9 +428,9 @@ update_user(user_id=<sub>, status="admin")  → promote to admin
 update_user(user_id=<sub>, status="banned") → ban a user
 ```
 
-`user_id` is the Google subject ID (`sub`) — visible in `list_users` output.
+`user_id` is the provider subject ID (`sub` claim) — visible in `list_users` output.
 
-Admins in `ADMIN_GOOGLE_IDS` are forcibly set to admin on every login, so admin status for bootstrap users cannot be accidentally revoked.
+Admins in `ADMIN_IDS` are forcibly set to admin on every login, so admin status for bootstrap users cannot be accidentally revoked.
 
 ---
 

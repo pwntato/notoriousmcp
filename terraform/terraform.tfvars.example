@@ -11,19 +11,23 @@
 # GitHub Actions secrets required:
 #   TF_STATE_BUCKET       — same as state_bucket above
 #   AWS_DEPLOY_ROLE_ARN   — output of `terraform output deploy_role_arn` after first apply
-#   GOOGLE_CLIENT_ID      — from Google Cloud Console
-#   GOOGLE_CLIENT_SECRET  — from Google Cloud Console
-#   ADMIN_GOOGLE_IDS      — comma-separated Google subject IDs
+#   OAUTH_CLIENT_ID       — OAuth client ID (from Google Cloud Console or Okta)
+#   OAUTH_CLIENT_SECRET   — OAuth client secret
+#   ADMIN_IDS             — comma-separated provider subject IDs (sub claim) for bootstrap admins
 #   TOKEN_SECRET          — min 32-byte random string for HMAC signing (e.g. openssl rand -base64 32)
 #   REDIRECT_URL          — full OAuth callback URL (e.g. https://YOUR_API_GW_DOMAIN/auth/callback)
 #
 # Note: No AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY needed — CI uses OIDC federation.
 
 # Required
-state_bucket         = "notoriousmcp-tfstate-YOUR_ACCOUNT_ID"
-google_client_id     = "YOUR_GOOGLE_CLIENT_ID"
-google_client_secret = "YOUR_GOOGLE_CLIENT_SECRET"
-admin_google_ids     = "GOOGLE_SUB_ID_1,GOOGLE_SUB_ID_2"
+state_bucket        = "notoriousmcp-tfstate-YOUR_ACCOUNT_ID"
+oauth_client_id     = "YOUR_OAUTH_CLIENT_ID"
+oauth_client_secret = "YOUR_OAUTH_CLIENT_SECRET"
+admin_ids           = "SUB_ID_1,SUB_ID_2"
+
+# OAuth provider — defaults to "google". Set to "okta" and provide okta_domain to use Okta.
+# oauth_provider = "okta"
+# okta_domain    = "dev-123.okta.com"
 token_secret         = "YOUR_RANDOM_SECRET_MIN_32_BYTES"
 redirect_url         = "https://YOUR_API_GW_DOMAIN/auth/callback"
 

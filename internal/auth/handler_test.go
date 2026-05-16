@@ -891,3 +891,62 @@ func TestConfigValidate(t *testing.T) {
 		t.Error("expected error for empty ClientSecret")
 	}
 }
+
+func TestOktaProviderEndpoints(t *testing.T) {
+	cfg := auth.Config{
+		Provider:     auth.ProviderOkta,
+		OktaDomain:   "test.okta.com",
+		ClientID:     "id",
+		ClientSecret: "secret",
+		RedirectURL:  "https://example.com/auth/callback",
+		TokenSecret:  []byte("exactly-32-bytes-long-secret-key!"),
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid okta config failed: %v", err)
+	}
+
+	authURL, tokenURL := cfg.ProviderEndpoint()
+	if authURL != "https://test.okta.com/oauth2/default/v1/authorize" {
+		t.Errorf("AuthURL: got %q", authURL)
+	}
+	if tokenURL != "https://test.okta.com/oauth2/default/v1/token" {
+		t.Errorf("TokenURL: got %q", tokenURL)
+	}
+
+	if got := cfg.UserInfoURL(); got != "https://test.okta.com/oauth2/default/v1/userinfo" {
+		t.Errorf("UserInfoURL: got %q", got)
+	}
+}
+
+func TestOktaValidateMissingDomain(t *testing.T) {
+	cfg := auth.Config{
+		Provider:     auth.ProviderOkta,
+		ClientID:     "id",
+		ClientSecret: "secret",
+		RedirectURL:  "https://example.com/auth/callback",
+		TokenSecret:  []byte("exactly-32-bytes-long-secret-key!"),
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected error for okta provider with no OktaDomain")
+	}
+}
+
+func TestDefaultProviderIsGoogle(t *testing.T) {
+	cfg := auth.Config{
+		// Provider intentionally unset — should default to Google
+		ClientID:     "id",
+		ClientSecret: "secret",
+		RedirectURL:  "https://example.com/auth/callback",
+		TokenSecret:  []byte("exactly-32-bytes-long-secret-key!"),
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("empty Provider should be valid (defaults to google): %v", err)
+	}
+	authURL, _ := cfg.ProviderEndpoint()
+	if authURL != "https://accounts.google.com/o/oauth2/auth" {
+		t.Errorf("default provider AuthURL: got %q, want Google's", authURL)
+	}
+	if got := cfg.UserInfoURL(); got != "https://openidconnect.googleapis.com/v1/userinfo" {
+		t.Errorf("default provider UserInfoURL: got %q", got)
+	}
+}

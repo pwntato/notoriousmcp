@@ -62,16 +62,18 @@ func initHandler() {
 		log.Fatalf("store: %v", err)
 	}
 
-	adminIDsRaw := ssmGet(mustEnv("SSM_ADMIN_GOOGLE_IDS"))
+	adminIDsRaw := ssmGet(mustEnv("SSM_ADMIN_IDS"))
 	tokenSecretRaw := ssmGet(mustEnv("SSM_TOKEN_SECRET"))
 	authCfg := auth.Config{
-		ClientID:       ssmGet(mustEnv("SSM_GOOGLE_CLIENT_ID")),
-		ClientSecret:   ssmGet(mustEnv("SSM_GOOGLE_CLIENT_SECRET")),
-		RedirectURL:    mustEnv("REDIRECT_URL"),
-		AdminGoogleIDs: filterEmpty(strings.Split(adminIDsRaw, ",")),
-		TokenSecret:    []byte(tokenSecretRaw),
-		TrustProxy:     true,
-		PublicBaseURL:  os.Getenv("PUBLIC_BASE_URL"),
+		Provider:     auth.OAuthProvider(os.Getenv("OAUTH_PROVIDER")),
+		OktaDomain:   os.Getenv("OKTA_DOMAIN"),
+		ClientID:     ssmGet(mustEnv("SSM_OAUTH_CLIENT_ID")),
+		ClientSecret: ssmGet(mustEnv("SSM_OAUTH_CLIENT_SECRET")),
+		RedirectURL:  mustEnv("REDIRECT_URL"),
+		AdminIDs:     filterEmpty(strings.Split(adminIDsRaw, ",")),
+		TokenSecret:  []byte(tokenSecretRaw),
+		TrustProxy:   true,
+		PublicBaseURL: os.Getenv("PUBLIC_BASE_URL"),
 	}
 
 	authHandler := auth.New(authCfg, dbClient)

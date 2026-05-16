@@ -48,9 +48,9 @@ jobs:
         env:
           TF_VAR_aws_region: us-west-2
           TF_VAR_state_bucket: ${{ vars.TF_STATE_BUCKET }}
-          TF_VAR_google_client_id: ${{ secrets.GOOGLE_CLIENT_ID }}
-          TF_VAR_google_client_secret: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          TF_VAR_admin_google_ids: ${{ secrets.ADMIN_GOOGLE_IDS }}
+          TF_VAR_oauth_client_id: ${{ secrets.OAUTH_CLIENT_ID }}
+          TF_VAR_oauth_client_secret: ${{ secrets.OAUTH_CLIENT_SECRET }}
+          TF_VAR_admin_ids: ${{ secrets.ADMIN_IDS }}
           TF_VAR_token_secret: ${{ secrets.TOKEN_SECRET }}
           TF_VAR_redirect_url: ${{ vars.REDIRECT_URL }}
 

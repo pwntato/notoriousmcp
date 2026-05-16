@@ -24,3 +24,13 @@ func IssueExpiredToken(secret []byte, userID string) (string, error) {
 
 // ValidSignatureUserID exposes validSignatureUserID for testing.
 var ValidSignatureUserID = validSignatureUserID
+
+// ProviderEndpoint exposes Config.providerEndpoint for testing.
+// Returns (authURL, tokenURL).
+func (c Config) ProviderEndpoint() (string, string) {
+	ep := c.providerEndpoint()
+	return ep.AuthURL, ep.TokenURL
+}
+
+// UserInfoURL exposes Config.userInfoURL for testing.
+func (c Config) UserInfoURL() string { return c.userInfoURL() }
