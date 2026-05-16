@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 
 	"github.com/pwntato/notoriousmcp/internal/db"
 	"github.com/pwntato/notoriousmcp/internal/models"
@@ -39,16 +38,16 @@ func New(cfg Config, dbClient *db.Client) *Handler {
 	}
 	// Log admin sub IDs at startup so promotions are observable in logs.
 	// Logged as count + first-8-chars of each ID for auditability without
-	// exposing full Google subject IDs.
-	adminHints := make([]string, len(cfg.AdminGoogleIDs))
-	for i, id := range cfg.AdminGoogleIDs {
+	// exposing full subject IDs.
+	adminHints := make([]string, len(cfg.AdminIDs))
+	for i, id := range cfg.AdminIDs {
 		if len(id) > 8 {
 			adminHints[i] = id[:8] + "..."
 		} else {
 			adminHints[i] = id
 		}
 	}
-	log.Printf("auth: %d admin ID(s) configured: %v", len(cfg.AdminGoogleIDs), adminHints)
+	log.Printf("auth: %d admin ID(s) configured: %v", len(cfg.AdminIDs), adminHints)
 	return &Handler{
 		cfg: cfg,
 		db:  dbClient,
@@ -57,7 +56,7 @@ func New(cfg Config, dbClient *db.Client) *Handler {
 			ClientSecret: cfg.ClientSecret,
 			RedirectURL:  cfg.RedirectURL,
 			Scopes:       []string{"openid", "email", "profile"},
-			Endpoint:     google.Endpoint,
+			Endpoint:     cfg.providerEndpoint(),
 		},
 	}
 }
@@ -270,8 +269,8 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch Google user info.
-	info, err := fetchGoogleUserInfo(ctx, h.oauthCfg.Client(ctx, oauthToken))
+	// Fetch user info from the provider's userinfo endpoint.
+	info, err := fetchUserInfo(ctx, h.cfg.userInfoURL(), h.oauthCfg.Client(ctx, oauthToken))
 	if err != nil {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
@@ -389,10 +388,7 @@ func ValidateRedirectURI(configuredRedirectURL, clientRedirectURI string) error 
 	return nil
 }
 
-const (
-	googleUserInfoURL = "https://openidconnect.googleapis.com/v1/userinfo"
-	authCodeTTL       = 60 * time.Second
-)
+const authCodeTTL = 60 * time.Second
 
 // writeJSONError writes an RFC 6749-style JSON error response.
 func writeJSONError(w http.ResponseWriter, status int, errCode string) {
@@ -560,14 +556,18 @@ func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type googleUserInfo struct {
+type userInfo struct {
 	Sub   string `json:"sub"`
 	Email string `json:"email"`
 	Name  string `json:"name"`
 }
 
-func fetchGoogleUserInfo(ctx context.Context, client *http.Client) (*googleUserInfo, error) {
-	resp, err := client.Get(googleUserInfoURL)
+func fetchUserInfo(ctx context.Context, userinfoURL string, client *http.Client) (*userInfo, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, userinfoURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("userinfo request: %w", err)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("userinfo request: %w", err)
 	}
@@ -575,11 +575,11 @@ func fetchGoogleUserInfo(ctx context.Context, client *http.Client) (*googleUserI
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("userinfo status %d", resp.StatusCode)
 	}
-	// Limit response size — Google's userinfo payload is tiny but defense-in-depth.
+	// Limit response size — provider userinfo payloads are tiny but defense-in-depth.
 	// io.LimitedReader is used rather than http.MaxBytesReader to avoid passing
 	// a nil ResponseWriter (undocumented behaviour).
 	limited := &io.LimitedReader{R: resp.Body, N: 64 * 1024}
-	var info googleUserInfo
+	var info userInfo
 	if err := json.NewDecoder(limited).Decode(&info); err != nil {
 		return nil, fmt.Errorf("userinfo decode: %w", err)
 	}
@@ -593,10 +593,10 @@ func fetchGoogleUserInfo(ctx context.Context, client *http.Client) (*googleUserI
 // Note: GetUser → SaveUser is a non-atomic read-modify-write. Two concurrent
 // first-logins race safely: (a) SaveUser uses if_not_exists(CreatedAt) so
 // CreatedAt is never overwritten, (b) both concurrent reads return ErrNotFound,
-// both set status=pending (or status=admin for AdminGoogleIDs users), so both
+// both set status=pending (or status=admin for AdminIDs users), so both
 // writes produce the same result. Subsequent logins skip the write entirely when
 // status/email/name haven't changed, so they are also idempotent.
-func (h *Handler) upsertUser(ctx context.Context, info *googleUserInfo, refreshToken string) error {
+func (h *Handler) upsertUser(ctx context.Context, info *userInfo, refreshToken string) error {
 	existing, err := h.db.GetUser(ctx, info.Sub)
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
 		return fmt.Errorf("get user: %w", err)
@@ -607,8 +607,8 @@ func (h *Handler) upsertUser(ctx context.Context, info *googleUserInfo, refreshT
 		status = existing.Status
 	}
 
-	// Admin bootstrap: ADMIN_GOOGLE_IDS always wins, self-heals on every login.
-	if slices.Contains(h.cfg.AdminGoogleIDs, info.Sub) {
+	// Admin bootstrap: ADMIN_IDS always wins, self-heals on every login.
+	if slices.Contains(h.cfg.AdminIDs, info.Sub) {
 		status = models.StatusAdmin
 	}
 

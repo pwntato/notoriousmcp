@@ -18,20 +18,40 @@ variable "state_bucket" {
   description = "S3 bucket name for Terraform remote state (created by bootstrap)"
 }
 
-variable "google_client_id" {
+variable "oauth_provider" {
+  type        = string
+  default     = "google"
+  description = "OAuth provider to use: \"google\" (default) or \"okta\""
+  validation {
+    condition     = contains(["google", "okta"], var.oauth_provider)
+    error_message = "oauth_provider must be \"google\" or \"okta\"."
+  }
+}
+
+variable "okta_domain" {
+  type        = string
+  default     = ""
+  description = "Okta domain (e.g. dev-123.okta.com). Required when oauth_provider is \"okta\"."
+  validation {
+    condition     = var.oauth_provider != "okta" || var.okta_domain != ""
+    error_message = "okta_domain is required when oauth_provider is \"okta\"."
+  }
+}
+
+variable "oauth_client_id" {
   type      = string
   sensitive = true
 }
 
-variable "google_client_secret" {
+variable "oauth_client_secret" {
   type      = string
   sensitive = true
 }
 
-variable "admin_google_ids" {
+variable "admin_ids" {
   type        = string
   sensitive   = true
-  description = "Comma-separated Google subject IDs for bootstrap admins"
+  description = "Comma-separated provider subject IDs (sub claim) for bootstrap admins"
 }
 
 variable "token_secret" {

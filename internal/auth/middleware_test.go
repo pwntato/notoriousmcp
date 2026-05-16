@@ -27,9 +27,9 @@ func testMiddlewareCfg() auth.Config {
 	}
 }
 
-func testMiddlewareCfgWithGoogleURL(googleTokenURL string) auth.Config {
+func testMiddlewareCfgWithTokenURL(tokenURL string) auth.Config {
 	cfg := testMiddlewareCfg()
-	cfg.GoogleTokenURL = googleTokenURL
+	cfg.OverrideTokenURL = tokenURL
 	return cfg
 }
 
@@ -396,7 +396,7 @@ func TestMiddlewareExpiredTokenRefreshSuccess(t *testing.T) {
 	googleSrv := fakeGoogleTokenServer(t, true)
 	defer googleSrv.Close()
 
-	h := auth.Middleware(testMiddlewareCfgWithGoogleURL(googleSrv.URL), dbClient, http.HandlerFunc(okHandler))
+	h := auth.Middleware(testMiddlewareCfgWithTokenURL(googleSrv.URL), dbClient, http.HandlerFunc(okHandler))
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("Authorization", "Bearer "+expired)
 	w := httptest.NewRecorder()
@@ -448,7 +448,7 @@ func TestMiddlewareXNewTokenAbsentOnNextError(t *testing.T) {
 		http.Error(w, "not found", http.StatusNotFound)
 	})
 
-	h := auth.Middleware(testMiddlewareCfgWithGoogleURL(googleSrv.URL), dbClient, errorHandler)
+	h := auth.Middleware(testMiddlewareCfgWithTokenURL(googleSrv.URL), dbClient, errorHandler)
 	req := httptest.NewRequest("GET", "/missing", nil)
 	req.Header.Set("Authorization", "Bearer "+expired)
 	w := httptest.NewRecorder()
@@ -502,7 +502,7 @@ func TestMiddlewareExpiredTokenRefreshBannedUser(t *testing.T) {
 	googleSrv := fakeGoogleTokenServer(t, true)
 	defer googleSrv.Close()
 
-	h := auth.Middleware(testMiddlewareCfgWithGoogleURL(googleSrv.URL), dbClient, http.HandlerFunc(okHandler))
+	h := auth.Middleware(testMiddlewareCfgWithTokenURL(googleSrv.URL), dbClient, http.HandlerFunc(okHandler))
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("Authorization", "Bearer "+expired)
 	w := httptest.NewRecorder()
@@ -544,7 +544,7 @@ func TestMiddlewareRefreshTokenRotation(t *testing.T) {
 	}))
 	defer googleSrv.Close()
 
-	h := auth.Middleware(testMiddlewareCfgWithGoogleURL(googleSrv.URL), dbClient, http.HandlerFunc(okHandler))
+	h := auth.Middleware(testMiddlewareCfgWithTokenURL(googleSrv.URL), dbClient, http.HandlerFunc(okHandler))
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("Authorization", "Bearer "+expired)
 	w := httptest.NewRecorder()
@@ -592,7 +592,7 @@ func TestMiddlewareRefreshTokenNoRotation(t *testing.T) {
 	}))
 	defer googleSrv.Close()
 
-	h := auth.Middleware(testMiddlewareCfgWithGoogleURL(googleSrv.URL), dbClient, http.HandlerFunc(okHandler))
+	h := auth.Middleware(testMiddlewareCfgWithTokenURL(googleSrv.URL), dbClient, http.HandlerFunc(okHandler))
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("Authorization", "Bearer "+expired)
 	w := httptest.NewRecorder()
@@ -630,7 +630,7 @@ func TestMiddlewareExpiredTokenRevokedRefreshToken(t *testing.T) {
 	googleSrv := fakeGoogleTokenServer(t, false) // Google returns 400 invalid_grant
 	defer googleSrv.Close()
 
-	h := auth.Middleware(testMiddlewareCfgWithGoogleURL(googleSrv.URL), dbClient, http.HandlerFunc(okHandler))
+	h := auth.Middleware(testMiddlewareCfgWithTokenURL(googleSrv.URL), dbClient, http.HandlerFunc(okHandler))
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("Authorization", "Bearer "+expired)
 	w := httptest.NewRecorder()

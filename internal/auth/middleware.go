@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 
 	"github.com/pwntato/notoriousmcp/internal/db"
 	"github.com/pwntato/notoriousmcp/internal/models"
@@ -39,10 +38,10 @@ func WithUserContext(ctx context.Context, user *models.User) context.Context {
 // DynamoDB (never trusting embedded token claims for authorization), and injects
 // the user into the request context.
 //
-// If the token is expired and the user has a stored Google refresh token,
-// the token is exchanged live with Google's token endpoint to confirm it is
-// still valid. On success a fresh notoriousmcp access token is issued and
-// delivered via X-New-Token. If Google rejects the token (revoked/expired),
+// If the token is expired and the user has a stored provider refresh token,
+// the token is exchanged live with the provider's token endpoint to confirm it
+// is still valid. On success a fresh notoriousmcp access token is issued and
+// delivered via X-New-Token. If the provider rejects the token (revoked/expired),
 // the stored token is deleted from DynamoDB and the request gets 401.
 // X-New-Token is only written when next responds with a 2xx status code —
 // the response is buffered to enforce this. A 401, 403, or 5xx from next
@@ -158,7 +157,7 @@ func tryRefresh(ctx context.Context, cfg Config, dbClient *db.Client, rawToken s
 		return "", "", err
 	}
 
-	rotatedToken, err := exchangeGoogleRefreshToken(ctx, cfg, storedToken)
+	rotatedToken, err := exchangeRefreshToken(ctx, cfg, storedToken)
 	if err != nil {
 		// Token was revoked or otherwise rejected by Google — remove it so future
 		// refresh attempts fail fast without hitting Google unnecessarily.
@@ -168,8 +167,8 @@ func tryRefresh(ctx context.Context, cfg Config, dbClient *db.Client, rawToken s
 		return "", "", ErrInvalidToken
 	}
 
-	// Google rotates refresh tokens for inactive users. Persist the new token so
-	// the stored value doesn't silently go stale.
+	// Some providers rotate refresh tokens for inactive users. Persist the new
+	// token so the stored value doesn't silently go stale.
 	if rotatedToken != "" && rotatedToken != storedToken {
 		if saveErr := dbClient.SaveRefreshToken(ctx, userID, rotatedToken); saveErr != nil {
 			log.Printf("auth: save rotated refresh token for %s: %v", userID, saveErr)
@@ -183,19 +182,15 @@ func tryRefresh(ctx context.Context, cfg Config, dbClient *db.Client, rawToken s
 	return newToken, userID, nil
 }
 
-// exchangeGoogleRefreshToken performs a live token exchange with Google to
-// confirm the stored refresh token is still valid. It returns the new refresh
-// token (non-empty only when Google rotates it) and a non-nil error if Google
-// rejects the token.
-func exchangeGoogleRefreshToken(ctx context.Context, cfg Config, refreshToken string) (newRefreshToken string, err error) {
-	endpoint := google.Endpoint
-	if cfg.GoogleTokenURL != "" {
-		endpoint = oauth2.Endpoint{TokenURL: cfg.GoogleTokenURL}
-	}
+// exchangeRefreshToken performs a live token exchange with the configured
+// provider to confirm the stored refresh token is still valid. It returns the
+// new refresh token (non-empty only when the provider rotates it) and a non-nil
+// error if the provider rejects the token.
+func exchangeRefreshToken(ctx context.Context, cfg Config, refreshToken string) (newRefreshToken string, err error) {
 	oauthCfg := &oauth2.Config{
 		ClientID:     cfg.ClientID,
 		ClientSecret: cfg.ClientSecret,
-		Endpoint:     endpoint,
+		Endpoint:     cfg.providerEndpoint(),
 	}
 	src := oauthCfg.TokenSource(ctx, &oauth2.Token{RefreshToken: refreshToken})
 	tok, err := src.Token()

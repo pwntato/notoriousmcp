@@ -96,9 +96,9 @@ data "aws_iam_policy_document" "deploy_policy" {
   statement {
     actions = ["ssm:GetParameter", "ssm:GetParameters", "ssm:ListTagsForResource"]
     resources = [
-      aws_ssm_parameter.google_client_id.arn,
-      aws_ssm_parameter.google_client_secret.arn,
-      aws_ssm_parameter.admin_google_ids.arn,
+      aws_ssm_parameter.oauth_client_id.arn,
+      aws_ssm_parameter.oauth_client_secret.arn,
+      aws_ssm_parameter.admin_ids.arn,
       aws_ssm_parameter.token_secret.arn,
     ]
   }
@@ -217,9 +217,9 @@ data "aws_iam_policy_document" "deploy_policy" {
     # main (currently only pwntato) can overwrite production secrets.
     actions = ["ssm:PutParameter", "ssm:AddTagsToResource"]
     resources = [
-      aws_ssm_parameter.google_client_id.arn,
-      aws_ssm_parameter.google_client_secret.arn,
-      aws_ssm_parameter.admin_google_ids.arn,
+      aws_ssm_parameter.oauth_client_id.arn,
+      aws_ssm_parameter.oauth_client_secret.arn,
+      aws_ssm_parameter.admin_ids.arn,
       aws_ssm_parameter.token_secret.arn,
     ]
   }

@@ -31,15 +31,17 @@ func main() {
 		log.Fatalf("store: %v", err)
 	}
 
-	adminIDs := strings.Split(os.Getenv("ADMIN_GOOGLE_IDS"), ",")
+	adminIDs := strings.Split(os.Getenv("ADMIN_IDS"), ",")
 	tokenSecret := []byte(envOrDefault("TOKEN_SECRET", "local-dev-secret-key-at-least-32!!"))
 	authCfg := auth.Config{
-		ClientID:       envOrDefault("GOOGLE_CLIENT_ID", "local-client-id"),
-		ClientSecret:   envOrDefault("GOOGLE_CLIENT_SECRET", "local-client-secret"),
-		RedirectURL:    envOrDefault("REDIRECT_URL", "http://localhost:3000/auth/callback"),
-		AdminGoogleIDs: filterEmpty(adminIDs),
-		TokenSecret:    tokenSecret,
-		TrustProxy:     false,
+		Provider:     auth.OAuthProvider(os.Getenv("OAUTH_PROVIDER")),
+		OktaDomain:   os.Getenv("OKTA_DOMAIN"),
+		ClientID:     envOrDefault("OAUTH_CLIENT_ID", "local-client-id"),
+		ClientSecret: envOrDefault("OAUTH_CLIENT_SECRET", "local-client-secret"),
+		RedirectURL:  envOrDefault("REDIRECT_URL", "http://localhost:3000/auth/callback"),
+		AdminIDs:     filterEmpty(adminIDs),
+		TokenSecret:  tokenSecret,
+		TrustProxy:   false,
 	}
 
 	authHandler := auth.New(authCfg, dbClient)
@@ -87,7 +89,7 @@ func envOrDefault(key, def string) string {
 }
 
 // filterEmpty removes empty strings. Needed because strings.Split("", ",") returns
-// [""] rather than [], so an unset ADMIN_GOOGLE_IDS env var must be cleaned before
+// [""] rather than [], so an unset ADMIN_IDS env var must be cleaned before
 // passing to auth.Config.
 func filterEmpty(ss []string) []string {
 	var out []string
