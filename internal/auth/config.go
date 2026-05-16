@@ -44,6 +44,10 @@ type Config struct {
 // providerEndpoint returns the oauth2.Endpoint for the configured provider.
 // For Okta it derives endpoints from the domain; for Google it uses the
 // well-known constant from golang.org/x/oauth2/google.
+//
+// OverrideTokenURL is for tests only — it returns an endpoint with only
+// TokenURL set (AuthURL is empty), which is fine for token-exchange tests
+// but would break a full authorization redirect.
 func (c Config) providerEndpoint() oauth2.Endpoint {
 	if c.OverrideTokenURL != "" {
 		return oauth2.Endpoint{TokenURL: c.OverrideTokenURL}

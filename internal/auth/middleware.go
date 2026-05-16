@@ -159,8 +159,8 @@ func tryRefresh(ctx context.Context, cfg Config, dbClient *db.Client, rawToken s
 
 	rotatedToken, err := exchangeRefreshToken(ctx, cfg, storedToken)
 	if err != nil {
-		// Token was revoked or otherwise rejected by Google — remove it so future
-		// refresh attempts fail fast without hitting Google unnecessarily.
+		// Token was revoked or otherwise rejected by the provider — remove it so
+		// future refresh attempts fail fast without hitting the provider unnecessarily.
 		if delErr := dbClient.DeleteRefreshToken(ctx, userID); delErr != nil {
 			log.Printf("auth: delete revoked refresh token for %s: %v", userID, delErr)
 		}
