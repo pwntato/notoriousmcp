@@ -627,7 +627,7 @@ func TestMiddlewareExpiredTokenRevokedRefreshToken(t *testing.T) {
 		t.Fatalf("issue expired: %v", err)
 	}
 
-	tokenSrv := fakeTokenServer(t, false) // Google returns 400 invalid_grant
+	tokenSrv := fakeTokenServer(t, false) // provider returns 400 invalid_grant (revoked)
 	defer tokenSrv.Close()
 
 	h := auth.Middleware(testMiddlewareCfgWithTokenURL(tokenSrv.URL), dbClient, http.HandlerFunc(okHandler))
