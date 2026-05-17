@@ -26,8 +26,9 @@ oauth_client_secret = "YOUR_OAUTH_CLIENT_SECRET"
 admin_ids           = "SUB_ID_1,SUB_ID_2"
 
 # OAuth provider — defaults to "google". Set to "okta" and provide okta_domain to use Okta.
-# oauth_provider = "okta"
-# okta_domain    = "dev-123.okta.com"
+# oauth_provider     = "okta"
+# okta_domain        = "dev-123.okta.com"
+# auto_approve_users = true   # set true for Okta; leave false (default) for Google
 token_secret         = "YOUR_RANDOM_SECRET_MIN_32_BYTES"
 redirect_url         = "https://YOUR_API_GW_DOMAIN/auth/callback"
 
