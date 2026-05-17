@@ -140,6 +140,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
+		log.Printf("login: get client %q: %v", clientID, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
