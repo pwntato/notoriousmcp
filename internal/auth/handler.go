@@ -123,39 +123,44 @@ type oauthStatePayload struct {
 	CodeChallenge     string `json:"cc,omitempty"`
 }
 
-// login initiates the OAuth flow by redirecting to Google.
+// login initiates the OAuth flow by redirecting to the OAuth provider.
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	clientRedirectURI := r.URL.Query().Get("redirect_uri")
 
-	// Validate redirect_uri against the configured redirect URL origin to
-	// prevent open-redirect attacks.
-	if clientRedirectURI != "" {
-		if err := ValidateRedirectURI(h.cfg.RedirectURL, clientRedirectURI); err != nil {
-			http.Error(w, "invalid redirect_uri", http.StatusBadRequest)
-			return
-		}
+	// client_id is required — all clients must register via POST /register first.
+	clientID := r.URL.Query().Get("client_id")
+	if clientID == "" {
+		http.Error(w, "client_id is required", http.StatusBadRequest)
+		return
+	}
+	registered, err := h.db.GetClient(ctx, clientID)
+	if errors.Is(err, db.ErrNotFound) {
+		http.Error(w, "invalid client_id", http.StatusUnauthorized)
+		return
+	}
+	if err != nil {
+		log.Printf("login: get client %q: %v", clientID, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
 
-	// If a client_id is provided (dynamically registered client), verify it
-	// exists in the registry and that its stored redirect URI matches.
-	// Clients that omit client_id are allowed through for backwards compatibility
-	// (pre-registration flows and direct token use); the redirect_uri check above
-	// is still the primary open-redirect guard for those callers.
-	if clientID := r.URL.Query().Get("client_id"); clientID != "" {
-		registered, err := h.db.GetClient(ctx, clientID)
-		if errors.Is(err, db.ErrNotFound) {
-			http.Error(w, "invalid client_id", http.StatusUnauthorized)
-			return
-		}
-		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		if clientRedirectURI != "" && registered.RedirectURI != clientRedirectURI {
+	// If redirect_uri is provided it must match the registered value exactly.
+	// If omitted, fall back to the registered redirect URI (RFC 6749 §4.1.1).
+	if clientRedirectURI != "" {
+		if registered.RedirectURI != clientRedirectURI {
 			http.Error(w, "redirect_uri mismatch", http.StatusBadRequest)
 			return
 		}
+	} else {
+		clientRedirectURI = registered.RedirectURI
+	}
+
+	// Validate the effective redirect_uri as a defence-in-depth check against
+	// any malformed values that may have been stored at registration time.
+	if err := ValidateRedirectURI(h.cfg.RedirectURL, clientRedirectURI); err != nil {
+		http.Error(w, "invalid redirect_uri", http.StatusBadRequest)
+		return
 	}
 
 	// PKCE (RFC 7636): if code_challenge is present, method must be S256.

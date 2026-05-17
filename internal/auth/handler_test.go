@@ -184,11 +184,17 @@ func TestWellKnownPublicBaseURL(t *testing.T) {
 }
 
 func TestLoginSetsNonceCookieAndRedirects(t *testing.T) {
-	h := newTestHandler(t)
+	h, dbClient := newTestHandlerWithDB(t)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest("GET", "/auth/login?redirect_uri=https://example.com/auth/callback&state=client-state-xyz", nil)
+	clientID := "client-" + randUID()
+	redirectURI := "https://example.com/auth/callback"
+	if err := dbClient.SaveClient(context.Background(), clientID, redirectURI, "test"); err != nil {
+		t.Fatalf("save client: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/auth/login?client_id="+clientID+"&redirect_uri="+redirectURI+"&state=client-state-xyz", nil)
 	req.Host = "example.com"
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -221,18 +227,24 @@ func TestLoginSetsNonceCookieAndRedirects(t *testing.T) {
 	}
 }
 
-func TestLoginRejectsInvalidRedirectURI(t *testing.T) {
-	h := newTestHandler(t)
+func TestLoginRejectsRedirectURIMismatch(t *testing.T) {
+	h, dbClient := newTestHandlerWithDB(t)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest("GET", "/auth/login?redirect_uri=https://evil.com/steal", nil)
+	clientID := "client-" + randUID()
+	if err := dbClient.SaveClient(context.Background(), clientID, "http://127.0.0.1:54321/callback", "test"); err != nil {
+		t.Fatalf("save client: %v", err)
+	}
+
+	// redirect_uri present but doesn't match the registered value.
+	req := httptest.NewRequest("GET", "/auth/login?client_id="+clientID+"&redirect_uri=https://evil.com/steal", nil)
 	req.Host = "example.com"
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
-		t.Errorf("status: got %d want 400 for invalid redirect_uri", w.Code)
+		t.Errorf("status: got %d want 400 for redirect_uri mismatch", w.Code)
 	}
 }
 
@@ -606,9 +618,46 @@ func TestLoginAcceptsRegisteredClientID(t *testing.T) {
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
-	// Proceeds to Google redirect (302) — client_id accepted.
+	// Proceeds to provider redirect (302) — client_id accepted.
 	if w.Code != http.StatusFound {
 		t.Errorf("status: got %d want 302 for valid registered client_id", w.Code)
+	}
+}
+
+func TestLoginRequiresClientID(t *testing.T) {
+	h, _ := newTestHandlerWithDB(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/auth/login?redirect_uri=http://127.0.0.1:54321/callback", nil)
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d want 400 when client_id is absent", w.Code)
+	}
+}
+
+func TestLoginUsesRegisteredRedirectURIWhenOmitted(t *testing.T) {
+	h, dbClient := newTestHandlerWithDB(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	clientID := "client-" + randUID()
+	redirectURI := "http://127.0.0.1:54321/callback"
+	if err := dbClient.SaveClient(context.Background(), clientID, redirectURI, "test"); err != nil {
+		t.Fatalf("save client: %v", err)
+	}
+
+	// Omit redirect_uri — should fall back to the registered value.
+	req := httptest.NewRequest("GET", "/auth/login?client_id="+clientID, nil)
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Errorf("status: got %d want 302 when redirect_uri omitted but registered", w.Code)
 	}
 }
 
@@ -855,11 +904,16 @@ func TestTokenEndpointPKCEWrongVerifier(t *testing.T) {
 }
 
 func TestLoginRejectsUnknownCodeChallengeMethod(t *testing.T) {
-	h := newTestHandler(t)
+	h, dbClient := newTestHandlerWithDB(t)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest("GET", "/auth/login?code_challenge=abc&code_challenge_method=plain", nil)
+	clientID := "client-" + randUID()
+	if err := dbClient.SaveClient(context.Background(), clientID, "http://127.0.0.1:54321/callback", "test"); err != nil {
+		t.Fatalf("save client: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/auth/login?client_id="+clientID+"&code_challenge=abc&code_challenge_method=plain", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
