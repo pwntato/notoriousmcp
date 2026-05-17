@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"time"
@@ -34,3 +35,8 @@ func (c Config) ProviderEndpoint() (string, string) {
 
 // UserInfoURL exposes Config.userInfoURL for testing.
 func (c Config) UserInfoURL() string { return c.userInfoURL() }
+
+// UpsertUser exposes upsertUser for whitebox unit tests.
+func (h *Handler) UpsertUser(ctx context.Context, sub, email, name, refreshToken string) error {
+	return h.upsertUser(ctx, &userInfo{Sub: sub, Email: email, Name: name}, refreshToken)
+}

@@ -53,7 +53,7 @@ Lambda Function  (arm64, 256MB, 30s timeout)
 
 **Manual token flow** (for scripting/testing): register a client via `POST /register`, then visit `/auth/login?client_id=<your-client-id>` in a browser, complete the OAuth flow, copy the `?code=` from the redirect URL, then POST it to `/auth/token`.
 
-New accounts start as **pending** and can only call `check_status`. An admin must promote them to **user** or **admin**.
+New accounts start as **pending** and can only call `check_status`. An admin must promote them to **user** or **admin**. Set `AUTO_APPROVE_USERS=true` to skip manual approval (recommended for Okta deployments where any authenticated user is an employee).
 
 **Admin bootstrap:** The `ADMIN_IDS` SSM parameter holds a comma-separated list of provider subject IDs (`sub` claim) that are forcibly set to `admin` status on every login. This self-heals if admin status is accidentally removed.
 
@@ -390,6 +390,10 @@ ADMIN_IDS=<your provider subject ID>
 # To use Okta instead of Google:
 # OAUTH_PROVIDER=okta
 # OKTA_DOMAIN=dev-123.okta.com
+
+# Auto-approve new users on first login (skip manual admin approval).
+# Recommended for Okta deployments; leave unset for Google OAuth.
+# AUTO_APPROVE_USERS=true
 ```
 
 Add `http://localhost:3000/auth/callback` as an authorized redirect URI in your OAuth app.

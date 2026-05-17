@@ -27,6 +27,11 @@ type Config struct {
 	RedirectURL  string   // e.g. https://notoriousmcp.com/auth/callback
 	AdminIDs     []string // subject IDs (provider "sub" claim) always promoted to admin on login
 	TokenSecret  []byte   // HMAC-SHA256 secret for signing access tokens; min 32 bytes
+	// AutoApproveUsers sets new users to "user" status on first login instead of
+	// "pending". Intended for Okta deployments where any authenticated user is an
+	// employee. Leave false (the default) for Google OAuth deployments where any
+	// Google account holder can authenticate.
+	AutoApproveUsers bool
 	// TrustProxy enables X-Forwarded-Proto scheme detection. Set true only when
 	// running behind a trusted reverse proxy (CloudFront/ALB). Never set on
 	// direct-to-internet deployments — it allows scheme downgrade spoofing.

@@ -34,14 +34,15 @@ func main() {
 	adminIDs := strings.Split(os.Getenv("ADMIN_IDS"), ",")
 	tokenSecret := []byte(envOrDefault("TOKEN_SECRET", "local-dev-secret-key-at-least-32!!"))
 	authCfg := auth.Config{
-		Provider:     auth.OAuthProvider(os.Getenv("OAUTH_PROVIDER")),
-		OktaDomain:   os.Getenv("OKTA_DOMAIN"),
-		ClientID:     envOrDefault("OAUTH_CLIENT_ID", "local-client-id"),
-		ClientSecret: envOrDefault("OAUTH_CLIENT_SECRET", "local-client-secret"),
-		RedirectURL:  envOrDefault("REDIRECT_URL", "http://localhost:3000/auth/callback"),
-		AdminIDs:     filterEmpty(adminIDs),
-		TokenSecret:  tokenSecret,
-		TrustProxy:   false,
+		Provider:         auth.OAuthProvider(os.Getenv("OAUTH_PROVIDER")),
+		OktaDomain:       os.Getenv("OKTA_DOMAIN"),
+		ClientID:         envOrDefault("OAUTH_CLIENT_ID", "local-client-id"),
+		ClientSecret:     envOrDefault("OAUTH_CLIENT_SECRET", "local-client-secret"),
+		RedirectURL:      envOrDefault("REDIRECT_URL", "http://localhost:3000/auth/callback"),
+		AdminIDs:         filterEmpty(adminIDs),
+		TokenSecret:      tokenSecret,
+		AutoApproveUsers: os.Getenv("AUTO_APPROVE_USERS") == "true",
+		TrustProxy:       false,
 	}
 
 	authHandler := auth.New(authCfg, dbClient)

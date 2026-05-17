@@ -38,6 +38,12 @@ variable "okta_domain" {
   }
 }
 
+variable "auto_approve_users" {
+  type        = bool
+  default     = false
+  description = "Auto-approve new users on first login (set to true for Okta deployments where any authenticated user is an employee)."
+}
+
 variable "oauth_client_id" {
   type      = string
   sensitive = true
