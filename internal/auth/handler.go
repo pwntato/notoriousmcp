@@ -49,6 +49,9 @@ func New(cfg Config, dbClient *db.Client) *Handler {
 	}
 	log.Printf("auth: %d admin ID(s) configured: %v", len(cfg.AdminIDs), adminHints)
 	log.Printf("auth: auto-approve users: %v", cfg.AutoApproveUsers)
+	if cfg.AutoApproveUsers && cfg.provider() != ProviderOkta {
+		log.Printf("auth: WARNING — AUTO_APPROVE_USERS=true with %s: any authenticated account will be auto-approved", cfg.provider())
+	}
 	return &Handler{
 		cfg: cfg,
 		db:  dbClient,
@@ -609,11 +612,11 @@ func (h *Handler) upsertUser(ctx context.Context, info *userInfo, refreshToken s
 	}
 
 	status := models.StatusPending
-	if existing == nil && h.cfg.AutoApproveUsers {
-		status = models.StatusUser
-	}
-	if existing != nil {
+	switch {
+	case existing != nil:
 		status = existing.Status
+	case h.cfg.AutoApproveUsers:
+		status = models.StatusUser
 	}
 
 	// Admin bootstrap: ADMIN_IDS always wins, self-heals on every login.
