@@ -903,6 +903,123 @@ func TestTokenEndpointPKCEWrongVerifier(t *testing.T) {
 	}
 }
 
+// ---- upsertUser / AutoApproveUsers tests ----
+
+func newTestHandlerWithDBAndConfig(t *testing.T, cfg auth.Config) (*auth.Handler, *db.Client) {
+	t.Helper()
+	dbClient := newTestDBClient(t)
+	return auth.New(cfg, dbClient), dbClient
+}
+
+func baseAutoApproveConfig() auth.Config {
+	return auth.Config{
+		ClientID:     "test-client-id",
+		ClientSecret: "test-client-secret",
+		RedirectURL:  "https://example.com/auth/callback",
+		TokenSecret:  []byte("test-secret-key-at-least-32-bytes!!"),
+		TrustProxy:   true,
+	}
+}
+
+func TestUpsertUserAutoApproveNewUser(t *testing.T) {
+	cfg := baseAutoApproveConfig()
+	cfg.AutoApproveUsers = true
+	h, dbClient := newTestHandlerWithDBAndConfig(t, cfg)
+
+	sub := "auto-" + randUID()
+	t.Cleanup(func() { _ = dbClient.DeleteUser(context.Background(), sub) })
+
+	if err := h.UpsertUser(context.Background(), sub, "a@example.com", "Alice", ""); err != nil {
+		t.Fatalf("upsertUser: %v", err)
+	}
+
+	u, err := dbClient.GetUser(context.Background(), sub)
+	if err != nil {
+		t.Fatalf("GetUser: %v", err)
+	}
+	if u.Status != "user" {
+		t.Errorf("status: got %q want %q", u.Status, "user")
+	}
+}
+
+func TestUpsertUserAutoApproveDefaultPending(t *testing.T) {
+	cfg := baseAutoApproveConfig()
+	cfg.AutoApproveUsers = false
+	h, dbClient := newTestHandlerWithDBAndConfig(t, cfg)
+
+	sub := "pending-" + randUID()
+	t.Cleanup(func() { _ = dbClient.DeleteUser(context.Background(), sub) })
+
+	if err := h.UpsertUser(context.Background(), sub, "b@example.com", "Bob", ""); err != nil {
+		t.Fatalf("upsertUser: %v", err)
+	}
+
+	u, err := dbClient.GetUser(context.Background(), sub)
+	if err != nil {
+		t.Fatalf("GetUser: %v", err)
+	}
+	if u.Status != "pending" {
+		t.Errorf("status: got %q want %q", u.Status, "pending")
+	}
+}
+
+func TestUpsertUserAutoApproveReturningUserUnchanged(t *testing.T) {
+	// A returning user who was already approved should not have their status reset.
+	cfg := baseAutoApproveConfig()
+	cfg.AutoApproveUsers = true
+	h, dbClient := newTestHandlerWithDBAndConfig(t, cfg)
+
+	sub := "returning-" + randUID()
+	t.Cleanup(func() { _ = dbClient.DeleteUser(context.Background(), sub) })
+
+	// First login — gets auto-approved to "user".
+	if err := h.UpsertUser(context.Background(), sub, "c@example.com", "Carol", ""); err != nil {
+		t.Fatalf("first upsertUser: %v", err)
+	}
+
+	// Simulate admin manually demoting to banned status.
+	u, _ := dbClient.GetUser(context.Background(), sub)
+	u.Status = "banned"
+	if err := dbClient.SaveUser(context.Background(), u); err != nil {
+		t.Fatalf("SaveUser: %v", err)
+	}
+
+	// Second login — auto-approve must NOT override existing status.
+	if err := h.UpsertUser(context.Background(), sub, "c@example.com", "Carol", ""); err != nil {
+		t.Fatalf("second upsertUser: %v", err)
+	}
+
+	u2, err := dbClient.GetUser(context.Background(), sub)
+	if err != nil {
+		t.Fatalf("GetUser: %v", err)
+	}
+	if u2.Status != "banned" {
+		t.Errorf("status: got %q want %q (existing status must be preserved)", u2.Status, "banned")
+	}
+}
+
+func TestUpsertUserAutoApproveAdminBootstrapWins(t *testing.T) {
+	sub := "admin-" + randUID()
+	cfg := baseAutoApproveConfig()
+	cfg.AutoApproveUsers = true
+	cfg.AdminIDs = []string{sub}
+	h, dbClient := newTestHandlerWithDBAndConfig(t, cfg)
+
+	t.Cleanup(func() { _ = dbClient.DeleteUser(context.Background(), sub) })
+
+	if err := h.UpsertUser(context.Background(), sub, "d@example.com", "Dave", ""); err != nil {
+		t.Fatalf("upsertUser: %v", err)
+	}
+
+	u, err := dbClient.GetUser(context.Background(), sub)
+	if err != nil {
+		t.Fatalf("GetUser: %v", err)
+	}
+	if u.Status != "admin" {
+		t.Errorf("status: got %q want %q (admin bootstrap must win over auto-approve)", u.Status, "admin")
+	}
+}
+
 func TestLoginRejectsUnknownCodeChallengeMethod(t *testing.T) {
 	h, dbClient := newTestHandlerWithDB(t)
 	mux := http.NewServeMux()

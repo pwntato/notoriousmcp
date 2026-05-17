@@ -92,6 +92,7 @@ resource "aws_lambda_function" "main" {
       PUBLIC_BASE_URL         = local.public_base_url
       OAUTH_PROVIDER          = var.oauth_provider
       OKTA_DOMAIN             = var.okta_domain
+      AUTO_APPROVE_USERS      = var.auto_approve_users ? "true" : ""
       SSM_OAUTH_CLIENT_ID     = aws_ssm_parameter.oauth_client_id.name
       SSM_OAUTH_CLIENT_SECRET = aws_ssm_parameter.oauth_client_secret.name
       SSM_ADMIN_IDS           = aws_ssm_parameter.admin_ids.name

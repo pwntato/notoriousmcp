@@ -48,6 +48,7 @@ func New(cfg Config, dbClient *db.Client) *Handler {
 		}
 	}
 	log.Printf("auth: %d admin ID(s) configured: %v", len(cfg.AdminIDs), adminHints)
+	log.Printf("auth: auto-approve users: %v", cfg.AutoApproveUsers)
 	return &Handler{
 		cfg: cfg,
 		db:  dbClient,
@@ -608,6 +609,9 @@ func (h *Handler) upsertUser(ctx context.Context, info *userInfo, refreshToken s
 	}
 
 	status := models.StatusPending
+	if existing == nil && h.cfg.AutoApproveUsers {
+		status = models.StatusUser
+	}
 	if existing != nil {
 		status = existing.Status
 	}
