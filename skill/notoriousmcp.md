@@ -16,7 +16,7 @@ Or copy it to wherever your project's skill files live and reference that path.
 
 ## Auth
 
-The server uses Google OAuth 2.0. Access tokens are 1-hour HMAC tokens passed as `Authorization: Bearer <token>`. When a token expires, the server silently issues a fresh one via the `X-New-Token` response header — your MCP client handles this automatically.
+The server uses OAuth 2.0 (Google or Okta). Access tokens are 1-hour HMAC tokens passed as `Authorization: Bearer <token>`. When a token expires, the server silently issues a fresh one via the `X-New-Token` response header — your MCP client handles this automatically.
 
 New accounts start as `pending` and only have access to `check_status`. An admin must approve you before the full tool set is available.
 
@@ -110,7 +110,7 @@ update_user(user_id, status)
 ```
 
 - `status` enum for users: `pending` | `user` | `admin` | `banned`
-- `user_id` is the Google subject ID (`sub`) — an opaque numeric string returned in the `user_id` field of `list_users` output.
+- `user_id` is the provider subject ID (`sub`) — an opaque string returned in the `user_id` field of `list_users` output.
 - Admins cannot change their own status away from `admin`.
 
 ### Status (pending/banned)
