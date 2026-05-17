@@ -51,7 +51,7 @@ Lambda Function  (arm64, 256MB, 30s timeout)
 5. Client POSTs the exchange code to `/auth/token` → receives an opaque Bearer token (1h TTL)
 6. On expiry, server issues a new token via `X-New-Token` response header — clients auto-refresh
 
-**Manual token flow** (for scripting/testing): visit `/auth/login` in a browser, complete the Google flow, copy the `?code=` from the redirect URL, then POST it to `/auth/token`.
+**Manual token flow** (for scripting/testing): register a client via `POST /register`, then visit `/auth/login?client_id=<your-client-id>` in a browser, complete the OAuth flow, copy the `?code=` from the redirect URL, then POST it to `/auth/token`.
 
 New accounts start as **pending** and can only call `check_status`. An admin must promote them to **user** or **admin**.
 
@@ -338,15 +338,22 @@ The `/register` endpoint accepts redirect URIs in RFC 8252 §7.3 loopback form (
 
 ### Manual token (scripting/testing)
 
-1. Visit `https://<your-api-gateway-domain>/auth/login` in a browser
-2. Complete the Google OAuth flow — you'll land on your redirect URI with `?code=<exchange-code>` in the URL
-3. POST the exchange code:
+1. Register a client (use your server's configured `REDIRECT_URL` as the redirect URI):
+   ```bash
+   curl -X POST https://<your-api-gateway-domain>/register \
+     -H "Content-Type: application/json" \
+     -d '{"redirect_uris":["https://<your-api-gateway-domain>/auth/callback"],"client_name":"manual"}'
+   # → {"client_id":"<your-client-id>", ...}
+   ```
+2. Visit `https://<your-api-gateway-domain>/auth/login?client_id=<your-client-id>` in a browser
+3. Complete the OAuth flow — you'll land on your redirect URI with `?code=<exchange-code>` in the URL
+4. POST the exchange code:
    ```bash
    curl -X POST https://<your-api-gateway-domain>/auth/token \
-     -H "Content-Type: application/json" \
-     -d '{"code": "<exchange-code>", "redirect_uri": "https://<your-api-gateway-domain>/auth/callback"}'
+     -H "Content-Type: application/x-www-form-urlencoded" \
+     -d 'grant_type=authorization_code&code=<exchange-code>&redirect_uri=https://<your-api-gateway-domain>/auth/callback'
    ```
-4. Use the returned token as a static Bearer header in your client config
+5. Use the returned token as a static Bearer header in your client config
 
 Tokens expire after 1 hour. The server issues a fresh token via `X-New-Token` on any authenticated request made with an expired-but-otherwise-valid token — clients that handle this header auto-refresh transparently.
 
